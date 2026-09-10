@@ -23,7 +23,7 @@ class IAFiscalRelatorioRoteiro:
 
     def __init__(self):
         self.client = genai.Client()
-        self.model = "gemini-2.5-flash"
+        self.model = "gemini-3.6-flash"
 
     def revisar_relatorio(
         self,
@@ -254,9 +254,3 @@ COMECE!
 
         linhas.append(f"\nTimestamp: {datetime.now().isoformat()}")
         return "\n".join(linhas)
-
-      
-        
-      
-      Stop Claude
-    

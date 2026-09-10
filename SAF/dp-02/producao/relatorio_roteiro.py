@@ -25,7 +25,7 @@ class IARelatorioRoteiro:
 
     def __init__(self):
         self.client = genai.Client()
-        self.model = "gemini-2.5-flash"
+        self.model = "gemini-3.6-flash"
 
     # ------------------------------------------------------------------
     # RELATÓRIO PDF
@@ -357,9 +357,3 @@ COMECE!
         if not match:
             raise ValueError("A IA de Relatório e Roteiro não retornou JSON válido.")
         return json.loads(match.group(0))
-
-      
-        
-      
-      Stop Claude
-    

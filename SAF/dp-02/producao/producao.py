@@ -202,7 +202,7 @@ class DepartamentoProducao:
 def exemplo_uso():
     """
     Demonstra o pipeline completo: Motor de Diagnóstico → Departamento de
-    Produção. Sem ANTHROPIC_API_KEY configurada, as chamadas às IAs vão
+    Produção. Sem GEMINI_API_KEY configurada, as chamadas às IAs vão
     falhar — o resultado esperado neste ambiente é REVISAO_MANUAL_NECESSARIA
     (a IA Fiscal nunca aprova por omissão, ver _validacao_padrao_em_erro),
     não um SUCESSO fabricado.
