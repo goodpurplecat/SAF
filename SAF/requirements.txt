@@ -1,0 +1,20 @@
+# FINSPOTS - SAF-V4 Requirements
+# Opcional: só se usar Departamento de Tratamento ou Produção (IAs com Gemini)
+google-genai>=1.0.0
+
+# Opcional: só se usar Departamento de Edição (dp-03)
+elevenlabs>=2.0.0 # IA de Áudio (narração)
+playwright>=1.40.0 # App de Formatação (PDF) e App de Slides (renderização HTML -> PNG/PDF)
+pypdf>=3.17.0 # Junta as páginas do relatório PDF renderizadas separadamente
+# após instalar playwright, rodar uma vez: playwright install chromium
+
+# --- Novidade: api.py (site, auth, pagamento, entrega) ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+itsdangerous>=2.1.0
+boto3>=1.34.0
+resend>=0.8.0
+mercadopago>=3.1.0 # >=3.1.0 traz mercadopago.webhook.validator, usado em api.py
+python-multipart>=0.0.9
