@@ -46,7 +46,7 @@ class IAFiscalProducaoFinal:
 
     def __init__(self):
         self.client = genai.Client()
-        self.model = "gemini-2.5-flash"
+        self.model = "gemini-3.6-flash"
 
     def revisar(
         self,
@@ -282,9 +282,3 @@ COMECE!
         linhas.append("✅ APROVADO — pronto pro cliente" if revisao.aprovado else "❌ NÃO APROVADO — precisa de revisão manual")
         linhas.append(f"Timestamp: {datetime.now().isoformat()}")
         return "\n".join(linhas)
-
-      
-        
-      
-      Stop Claude
-    
