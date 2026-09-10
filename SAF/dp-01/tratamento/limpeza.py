@@ -4,7 +4,6 @@ Padroniza dados validados para o formato exato que os engines (financial_engine 
 """
 
 from .models import *
-from anthropic import Anthropic
 from dataclasses import asdict
 
 
@@ -13,13 +12,14 @@ class IALimpeza:
     Recebe dados validados e limpos
     Padroniza estrutura, tipos, valores, formato de data
     Retorna JSON estruturado pronto para enviar aos motores de diagnóstico
+
+    Apesar do nome ("IA de Limpeza"), esta classe não chama nenhuma IA —
+    é conversão pura de dict/dataclass. CORREÇÃO (auditoria 10/09/2026):
+    removida a dependência morta do cliente Anthropic (self.client nunca
+    era chamado em lugar nenhum da classe); mantê-la quebraria o import
+    assim que `anthropic` saísse do requirements.txt, mesmo sem uso real.
     """
-    
-    def __init__(self):
-        self.client = Anthropic()
-        # CORREÇÃO (auditoria 04/09/2026): modelo antigo (2024) atualizado.
-        self.model = "claude-sonnet-5"
-    
+
     def limpar_dados(
         self,
         resultado_validado: ResultadoTratamento

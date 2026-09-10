@@ -1,6 +1,6 @@
 """
-IA EXTRATORA COM CLAUDE - Departamento de Tratamento (COMPLETO)
-Extrai dados brutos do cliente usando Claude para interpretar e estruturar
+IA EXTRATORA COM GEMINI - Departamento de Tratamento (COMPLETO)
+Extrai dados brutos do cliente usando Gemini para interpretar e estruturar
 Segue 100% o GUIA_DA_GEM_DE_TRATAMENTO_DE_DADOS
 """
 
@@ -13,7 +13,7 @@ from datetime import datetime
 
 class IAExtratora:
     """
-    IA Extratora que REALMENTE usa Claude para:
+    IA Extratora que REALMENTE usa Gemini para:
     1. Entender o formulário e arquivos
     2. Aplicar hierarquia de fontes
     3. Marcar qualidade de dados
@@ -23,7 +23,7 @@ class IAExtratora:
     def __init__(self):
         self.client = genai.Client()
         # CORREÇÃO (auditoria 04/09/2026): modelo antigo (2024) atualizado.
-        self.model = "gemini-2.5-flash"
+        self.model = "gemini-3.6-flash"
     
     def extrair_dados(
         self,
@@ -36,9 +36,9 @@ class IAExtratora:
         Usa CLAUDE para extrair e estruturar dados
         """
         
-        print("[IA EXTRATORA] 🔍 Iniciando extração com Claude...")
+        print("[IA EXTRATORA] 🔍 Iniciando extração com Gemini...")
         
-        # Montar prompt para Claude
+        # Montar prompt para Gemini
         prompt = self._montar_prompt_extracao(
             tipo_produto,
             respostas_formulario,
@@ -46,7 +46,7 @@ class IAExtratora:
             conteudo_arquivos
         )
         
-        # Chamar Claude
+        # Chamar Gemini
         try:
             response = self.client.models.generate_content(
             model=self.model,
@@ -55,7 +55,7 @@ class IAExtratora:
         )
             
             resultado_texto = response.text
-            print("[IA EXTRATORA] ✅ Claude respondeu")
+            print("[IA EXTRATORA] ✅ Gemini respondeu")
             
             # Parsear JSON da resposta
             dados_extraidos = self._parsear_resposta_claude(resultado_texto)
@@ -78,7 +78,7 @@ class IAExtratora:
         formulário de verdade existir, o motor consegue digerir?"): o
         prompt cortava formulário/arquivos com `[:N]` cru, sem nenhum
         aviso — se o corte caísse no meio do JSON, o texto sumia em
-        silêncio e Claude não tinha como saber que faltava conteúdo (um
+        silêncio e a IA não tinha como saber que faltava conteúdo (um
         formulário de 44 perguntas com respostas longas passa fácil de
         2000 caracteres). Agora o corte fica explícito no texto enviado.
         """
@@ -142,7 +142,7 @@ class IAExtratora:
         conteudo_arquivos: Dict[str, str]
     ) -> str:
         """
-        Monta prompt estruturado para Claude.
+        Monta prompt estruturado para Gemini.
 
         LIMPEZA (04/09/2026): o prompt não pede mais pra Claude "chutar" uma
         Categoria do negócio (A-E) — isso era um resquício de quando a
@@ -297,13 +297,13 @@ COMECE!
 """
     
     def _parsear_resposta_claude(self, texto: str) -> Dict[str, Any]:
-        """Extrai JSON da resposta de Claude"""
+        """Extrai JSON da resposta do Gemini"""
         match = re.search(r'\{.*\}', texto, re.DOTALL)
         if match:
             json_str = match.group(0)
             return json.loads(json_str)
         else:
-            raise ValueError("Claude não retornou JSON válido")
+            raise ValueError("Gemini não retornou JSON válido")
     
     def _montar_resultado_tratamento(
         self,
@@ -319,17 +319,17 @@ COMECE!
             CORREÇÃO CRÍTICA (05/09/2026, descoberta ao escrever
             teste_extracao_canais_customizados_sem_api() em
             test_tratamento.py): o prompt (_montar_prompt_extracao, acima)
-            instrui Claude a devolver "qualidade" em MAIÚSCULAS — "EXATO",
+            instrui a IA a devolver "qualidade" em MAIÚSCULAS — "EXATO",
             "ESTIMATIVA", "CALCULADO", "AUSENTE" (é literalmente o texto
             do JSON de exemplo no prompt). Só que QualidadeDado(...) chama
             o enum PELO VALUE, e os values são strings capitalizadas em
             português — "Exato", "Estimativa", "Calculado", "Ausente" (ver
             models.py). "EXATO" != "Exato", então `QualidadeDado("EXATO")`
             sempre levantava `ValueError: 'EXATO' is not a valid
-            QualidadeDado` — ou seja, TODA chamada real à API (Claude
+            QualidadeDado` — ou seja, TODA chamada real à API (a IA
             seguindo o prompt à risca) quebraria aqui, sempre, no primeiro
             campo. Como nenhum teste deste arquivo rodava sem
-            ANTHROPIC_API_KEY reproduzindo o formato exato do prompt, isso
+            GEMINI_API_KEY reproduzindo o formato exato do prompt, isso
             nunca foi pego antes. Corrigido aceitando os dois formatos:
             o VALUE do enum ("Exato", case-insensitive) e o NOME do membro
             ("EXATO", o que o prompt de fato pede) — cai em AUSENTE se vier
@@ -449,9 +449,3 @@ COMECE!
             timestamp=datetime.now().isoformat(),
             percepcoes_cliente=percepcoes_cliente,
         )
-
-      
-        
-      
-      Stop Claude
-    

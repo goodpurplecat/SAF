@@ -1,6 +1,6 @@
 """
-IA FISCAL DE DADOS COM CLAUDE - Departamento de Tratamento (COMPLETO)
-Valida dados extraídos usando Claude com checklist 🔴🟠🟡
+IA FISCAL DE DADOS COM GEMINI - Departamento de Tratamento (COMPLETO)
+Valida dados extraídos usando Gemini com checklist 🔴🟠🟡
 """
 
 from .models import *
@@ -12,13 +12,13 @@ from datetime import datetime
 
 class IAFiscalDados:
     """
-    IA Fiscal que usa CLAUDE para validar dados com 9-point checklist
+    IA Fiscal que usa GEMINI para validar dados com 9-point checklist
     """
     
     def __init__(self):
         self.client = genai.Client()
         # CORREÇÃO (auditoria 04/09/2026): modelo antigo (2024) atualizado.
-        self.model = "gemini-2.5-flash"
+        self.model = "gemini-3.6-flash"
     
     def validar_extracao(
         self,
@@ -27,7 +27,7 @@ class IAFiscalDados:
         dados_originais_arquivos: List[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Usa CLAUDE para validar dados com 9-point checklist
+        Usa GEMINI para validar dados com 9-point checklist
         Retorna: bloqueadores 🔴, ajustes 🟠, observações 🟡
 
         CORREÇÃO CRÍTICA (06/09/2026, auditoria "sistema digestivo"): esta
@@ -37,7 +37,7 @@ class IAFiscalDados:
         `dados_originais_formulario=` e `dados_originais_arquivos=` —
         argumentos que este método simplesmente não existia pra receber.
         Ou seja: toda vez que a IA Extratora tivesse sucesso de verdade
-        (com ANTHROPIC_API_KEY configurada), a chamada seguinte — Etapa
+        (com GEMINI_API_KEY configurada), a chamada seguinte — Etapa
         2/3, IA Fiscal de Dados — quebraria imediatamente com
         `TypeError: validar_extracao() got an unexpected keyword argument
         'dados_originais_formulario'`, derrubando o pipeline inteiro antes
@@ -56,7 +56,7 @@ class IAFiscalDados:
         de verdade.
         """
 
-        print("[IA FISCAL] ✅ Iniciando validação com Claude...")
+        print("[IA FISCAL] ✅ Iniciando validação com Gemini...")
 
         prompt = self._montar_prompt_validacao(
             resultado_extracao, dados_originais_formulario, dados_originais_arquivos
@@ -70,7 +70,7 @@ class IAFiscalDados:
         )
             
             resultado_texto = response.text
-            print("[IA FISCAL] ✅ Claude validou")
+            print("[IA FISCAL] ✅ Gemini validou")
             
             # Parsear JSON
             match = re.search(r'\{.*\}', resultado_texto, re.DOTALL)
@@ -89,9 +89,9 @@ class IAFiscalDados:
         """
         CORREÇÃO (06/09/2026, auditoria "sistema digestivo"): antes disso,
         o prompt cortava o JSON com `[:N]` cru — se o corte caísse no meio
-        de um valor, o texto simplesmente sumia sem nenhum aviso, e Claude
+        de um valor, o texto simplesmente sumia sem nenhum aviso, e a IA
         não tinha como saber que faltava conteúdo. Agora, quando há corte,
-        isso fica explícito no próprio texto enviado, pra Claude tratar o
+        isso fica explícito no próprio texto enviado, pra IA tratar o
         que ficou de fora como incerto em vez de simplesmente ignorar.
         """
         if len(texto) <= limite:
@@ -175,7 +175,7 @@ COMECE!
 """
     
     def _validacao_padrao(self) -> Dict[str, Any]:
-        """Retorna validação padrão se Claude falhar"""
+        """Retorna validação padrão se a IA (Gemini) falhar"""
         return {
             'bloqueadores': [],
             'ajustes': [],
@@ -250,9 +250,3 @@ COMECE!
         output += f"Timestamp: {validacao.get('timestamp', 'N/A')}\n"
         
         return output
-
-      
-        
-      
-      Stop Claude
-    
