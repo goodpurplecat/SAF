@@ -6,7 +6,7 @@ Como em test_producao.py e test_tratamento.py, dividido em:
    Playwright/ffmpeg reais — que são determinísticos, então rodam sempre
    neste ambiente) — templates, medição de estouro de texto, IA de Áudio em
    modo placeholder, montagem de vídeo, checagem de completude da IA Fiscal.
-2. Teste do pipeline completo (COM chamada de API) — sem ANTHROPIC_API_KEY
+2. Teste do pipeline completo (COM chamada de API) — sem GEMINI_API_KEY
    configurada neste ambiente, a IA Fiscal de Produção falha na chamada e
    cai em NÃO_APROVADO (nunca aprova por omissão) — a falha é esperada e
    capturada explicitamente, exatamente como test_producao.py faz com a
@@ -345,11 +345,11 @@ def teste_pipeline_completo_com_api():
     conteúdo já "aprovado" (simulado — normalmente viria do dp-02).
     A montagem de PDF/vídeo em si NÃO depende de nenhuma API (é
     determinística), mas a IA Fiscal de Produção final usa Claude — sem
-    ANTHROPIC_API_KEY, ela nunca aprova por omissão, então o status
+    GEMINI_API_KEY, ela nunca aprova por omissão, então o status
     esperado aqui é REVISAO_MANUAL_NECESSARIA, com os arquivos MESMO ASSIM
     gerados (só não aprovados pra ir pro cliente).
     """
-    print("\n[14/14] Pipeline completo (APP Intermediador → PDF + Vídeo → IA Fiscal) — requer ANTHROPIC_API_KEY pra aprovar...")
+    print("\n[14/14] Pipeline completo (APP Intermediador → PDF + Vídeo → IA Fiscal) — requer GEMINI_API_KEY pra aprovar...")
 
     relatorio_paginas = {
         2: "Sua loja faturou R$ 48.200 em agosto, com lucro líquido de R$ 9.640 (20% de margem).",
@@ -386,7 +386,7 @@ def teste_pipeline_completo_com_api():
     if resultado.status == StatusEdicao.SUCESSO:
         print(f"      ✅ Pipeline rodou de ponta a ponta com API real — APROVADO")
     else:
-        print(f"      ⚠️  REVISAO_MANUAL_NECESSARIA — esperado sem ANTHROPIC_API_KEY neste ambiente")
+        print(f"      ⚠️  REVISAO_MANUAL_NECESSARIA — esperado sem GEMINI_API_KEY neste ambiente")
         print("      (PDF e vídeo foram montados normalmente — só a aprovação final da IA Fiscal não rodou de verdade.)")
 
 

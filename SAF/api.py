@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 import mercadopago
 from mercadopago.webhook.validator import WebhookSignatureValidator, InvalidWebhookSignatureError
 from fastapi import FastAPI, Request, HTTPException, Depends, Cookie, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -38,15 +39,39 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Finspots API", lifespan=lifespan)
-pipeline = PipelineSAF()
+
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://finspots.com.br")
+
+# CORREÇÃO (auditoria 10/09/2026): CORS estava totalmente ausente — o
+# frontend (FRONTEND_URL, outro domínio) não conseguia chamar esta API do
+# navegador. allow_credentials=True é necessário porque a autenticação usa
+# cookie de sessão (ver /auth/confirmar). Se o frontend rodar em mais de um
+# domínio (ex.: staging + produção), ajuste allow_origins para uma lista.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_URL],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# CORREÇÃO (auditoria 10/09/2026, achado "música de fundo"): a Edição já
+# sabe fazer loop + fade de uma música por baixo da narração
+# (dp-03/edicao/video_assembler.py), mas o pipeline era instanciado sem
+# musica_path — nenhum vídeo saía com música, mesmo o recurso pronto.
+# Agora lê de MUSICA_BACKGROUND_PATH; segue None (comportamento antigo,
+# sem música) até essa variável apontar para um arquivo de áudio de
+# verdade (mp3/wav de fundo, sem letra) — ver AUDIO_CONFIG em
+# dp-03/edicao/design_config.py para volume/fade.
+MUSICA_BACKGROUND_PATH = os.environ.get("MUSICA_BACKGROUND_PATH")
+
+pipeline = PipelineSAF(musica_path=MUSICA_BACKGROUND_PATH)
 sdk_mp = mercadopago.SDK(os.environ["MERCADOPAGO_ACCESS_TOKEN"])
 
 # Chave secreta do webhook (Mercado Pago > Suas integrações > [sua aplicação]
 # > Webhooks > Configurar notificações). É DIFERENTE do MERCADOPAGO_ACCESS_TOKEN
 # — usada só pra validar a assinatura de quem está chamando o webhook.
 MERCADOPAGO_WEBHOOK_SECRET = os.environ["MERCADOPAGO_WEBHOOK_SECRET"]
-
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://finspots.com.br")
 
 PRECOS = {
     "Diagnóstico": 1800.00,

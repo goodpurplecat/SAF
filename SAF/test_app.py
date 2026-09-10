@@ -12,7 +12,7 @@ Como em test_tratamento.py/test_producao.py/test_edicao.py, dividido em:
    "CORREÇÃO (05/09/2026, auditoria app.py)" em limpeza.py), e a montagem
    de dados_graficos reais (com e sem período anterior).
 2. Teste do pipeline completo, de ponta a ponta de verdade (formulário →
-   PDF/vídeo) — requer ANTHROPIC_API_KEY; sem ela, a falha é ESPERADA e
+   PDF/vídeo) — requer GEMINI_API_KEY; sem ela, a falha é ESPERADA e
    capturada explicitamente (mesma limitação ambiental dos outros 3 testes).
 
 Também cobre a config/taxas_canais.json (05/09/2026, pedido do analista:
@@ -83,7 +83,7 @@ def _dados_limpos_diagnostico_fake():
     """
     Formato EXATO que dp-01/tratamento/limpeza.py::_limpar_para_diagnostico()
     produz hoje (pós-correção) — fabricado à mão aqui pra não depender da
-    IA Extratora/Fiscal (que precisam de ANTHROPIC_API_KEY).
+    IA Extratora/Fiscal (que precisam de GEMINI_API_KEY).
     """
     return {
         "tipo_produto": "DIAGNOSTICO",
@@ -331,12 +331,12 @@ def teste_taxas_canais_configuraveis():
 
 def teste_pipeline_completo_ponta_a_ponta():
     """
-    Ambiente sem ANTHROPIC_API_KEY: a falha na IA Extratora (dp-01, 1ª
+    Ambiente sem GEMINI_API_KEY: a falha na IA Extratora (dp-01, 1ª
     chamada de API de todo o pipeline) é ESPERADA — PipelineSAF.processar_cliente()
     captura isso e devolve ResultadoPipeline(status='ERRO', etapa='TRATAMENTO'),
     igual o comportamento já confirmado nos outros 3 testes.
     """
-    print("\n[7/7] Pipeline completo (Tratamento → Motor → Produção → Edição) — requer ANTHROPIC_API_KEY...")
+    print("\n[7/7] Pipeline completo (Tratamento → Motor → Produção → Edição) — requer GEMINI_API_KEY...")
 
     pipeline = PipelineSAF()
     resultado = pipeline.processar_cliente(
@@ -357,7 +357,7 @@ def teste_pipeline_completo_ponta_a_ponta():
             f"Sem API key, esperava ERRO/TRATAMENTO (não uma exceção não tratada); veio "
             f"status={resultado.status!r} etapa={resultado.etapa!r} mensagem={resultado.mensagem!r}"
         )
-        print(f"      ⚠️  ERRO/TRATAMENTO — esperado sem ANTHROPIC_API_KEY neste ambiente ({resultado.mensagem})")
+        print(f"      ⚠️  ERRO/TRATAMENTO — esperado sem GEMINI_API_KEY neste ambiente ({resultado.mensagem})")
         print("      (Isto NÃO é um bug — é a mesma limitação ambiental de test_tratamento.py/test_producao.py.)")
 
     print("\n      Entrada inválida (tipo_produto desconhecido) é rejeitada sem tocar em nenhum departamento...")

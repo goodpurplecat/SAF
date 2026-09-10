@@ -3,7 +3,7 @@ Teste do Departamento de Tratamento
 
 CORREÇÃO (05/09/2026, auditoria app.py): este arquivo não tinha nenhuma
 parte "estrutural" (sem API), ao contrário de test_producao.py/test_edicao.py
-— só o exemplo de uso completo (que precisa de ANTHROPIC_API_KEY pra
+— só o exemplo de uso completo (que precisa de GEMINI_API_KEY pra
 chamar a IA Extratora de verdade). Adicionadas duas partes sem API,
 testando diretamente a extração/limpeza do fluxo de canal customizado
 (pedido do analista: "o público que vou atender é só a galera do
@@ -18,7 +18,7 @@ na mão por cliente):
    `limpar_dados` de verdade quando integrado, mas os métodos internos de
    formatação são puros).
 3. Exemplo de uso completo (com API de verdade) — a falha é ESPERADA sem
-   ANTHROPIC_API_KEY e é capturada explicitamente (CORREÇÃO auditoria
+   GEMINI_API_KEY e é capturada explicitamente (CORREÇÃO auditoria
    05/09/2026: antes esse try/except não existia e o teste terminava com
    traceback não tratado, inconsistente com o que o docstring de
    test_producao.py já dizia sobre este arquivo).
@@ -86,7 +86,7 @@ def teste_extracao_canais_customizados_sem_api():
         "status_final": "COMPLETO",
     }
 
-    extratora = IAExtratora.__new__(IAExtratora)  # não chama __init__ (evita instanciar Anthropic())
+    extratora = IAExtratora.__new__(IAExtratora)  # não chama __init__ (evita instanciar o cliente Gemini)
     resultado = extratora._montar_resultado_tratamento(
         TipoProduto.DIAGNOSTICO, dados_extraidos_fake, formulario={}, arquivos=[],
     )
@@ -116,7 +116,7 @@ def teste_limpeza_repassa_taxas_customizadas_sem_api():
 
     resultado_tratamento = teste_extracao_canais_customizados_sem_api()
 
-    limpeza = IALimpeza.__new__(IALimpeza)  # não chama __init__ (evita instanciar Anthropic())
+    limpeza = IALimpeza.__new__(IALimpeza)  # IALimpeza não tem __init__ próprio (não usa IA)
     dados_limpos = limpeza._limpar_para_diagnostico(resultado_tratamento)
 
     assert dados_limpos["input_data"]["channel_revenues"] == {
@@ -188,7 +188,7 @@ def teste_percepcoes_cliente_extracao_e_limpeza_sem_api():
         "status_final": "COMPLETO",
     }
 
-    extratora = IAExtratora.__new__(IAExtratora)  # não chama __init__ (evita instanciar Anthropic())
+    extratora = IAExtratora.__new__(IAExtratora)  # não chama __init__ (evita instanciar o cliente Gemini)
     resultado = extratora._montar_resultado_tratamento(
         TipoProduto.DIAGNOSTICO, dados_extraidos_fake, formulario={}, arquivos=[],
     )
@@ -201,7 +201,7 @@ def teste_percepcoes_cliente_extracao_e_limpeza_sem_api():
     assert pc.tem_alguma_percepcao() is True
     print("      ✅ IAExtratora parseou percepcoes_cliente num PercepcoesCliente real.")
 
-    limpeza = IALimpeza.__new__(IALimpeza)  # não chama __init__ (evita instanciar Anthropic())
+    limpeza = IALimpeza.__new__(IALimpeza)  # IALimpeza não tem __init__ próprio (não usa IA)
     dados_limpos = limpeza._limpar_para_diagnostico(resultado)
 
     assert "percepcoes_cliente" in dados_limpos, (
@@ -242,7 +242,7 @@ def teste_extratora_digere_conteudo_de_arquivo_sem_api():
     """
     print("\n[4/6] IAExtratora: conteúdo real de arquivo chega no prompt (sem API)...")
 
-    extratora = IAExtratora.__new__(IAExtratora)  # não chama __init__ (evita instanciar Anthropic())
+    extratora = IAExtratora.__new__(IAExtratora)  # não chama __init__ (evita instanciar o cliente Gemini)
 
     arquivos_info = [{"nome": "ML_vendas_julho.csv", "formato": "csv", "tamanho": 1.2}]
     conteudo_arquivos = {
@@ -278,14 +278,14 @@ def teste_fiscal_de_dados_aceita_e_usa_originais_sem_api():
     `IAFiscalDados.validar_extracao()` passando também
     `dados_originais_formulario=` e `dados_originais_arquivos=` — mas a
     assinatura de `validar_extracao()` só aceitava `resultado_extracao`.
-    Em qualquer execução real (com ANTHROPIC_API_KEY configurada e a
+    Em qualquer execução real (com GEMINI_API_KEY configurada e a
     Extratora tendo sucesso), a Etapa 2/3 quebraria imediatamente com
     `TypeError: unexpected keyword argument`, derrubando o pipeline antes
     da Limpeza — bug nunca pego porque, sem chave de API, a Extratora já
     falha ANTES desta chamada ser alcançada (ver teste_completo abaixo).
 
     Este teste chama `validar_extracao()` via `__new__` (bypassa
-    `__init__`, evita instanciar `Anthropic()`) com os três argumentos que
+    `__init__`, evita instanciar o cliente Gemini) com os três argumentos que
     `DepartamentoTratamento` sempre envia — se a assinatura ainda
     estivesse errada, isto levantaria `TypeError` ANTES mesmo de tentar
     falar com a API. Como não há `self.client` (bypass do `__init__`), a
@@ -295,7 +295,7 @@ def teste_fiscal_de_dados_aceita_e_usa_originais_sem_api():
     """
     print("\n[5/6] IAFiscalDados: aceita dados_originais_* sem quebrar (sem API)...")
 
-    fiscal = IAFiscalDados.__new__(IAFiscalDados)  # não chama __init__ (evita instanciar Anthropic())
+    fiscal = IAFiscalDados.__new__(IAFiscalDados)  # não chama __init__ (evita instanciar o cliente Gemini)
     resultado_tratamento = teste_extracao_canais_customizados_sem_api()
 
     validacao = fiscal.validar_extracao(
@@ -375,13 +375,13 @@ def teste_completo():
             arquivos_info=arquivos_teste,
         )
     except Exception as e:
-        # Esperado neste ambiente: sem ANTHROPIC_API_KEY, a IA Extratora
+        # Esperado neste ambiente: sem GEMINI_API_KEY, a IA Extratora
         # falha na chamada — capturado explicitamente, igual
         # test_producao.py e test_edicao.py fazem nos pontos que chamam API.
-        print(f"\n⚠️  Falha esperada sem ANTHROPIC_API_KEY neste ambiente: {type(e).__name__}")
+        print(f"\n⚠️  Falha esperada sem GEMINI_API_KEY neste ambiente: {type(e).__name__}")
         print("      (Isto NÃO é um bug — mesma limitação ambiental dos outros testes.)")
         print("\n" + "=" * 70)
-        print("✅ TESTE ESTRUTURAL OK (pipeline completo requer ANTHROPIC_API_KEY)")
+        print("✅ TESTE ESTRUTURAL OK (pipeline completo requer GEMINI_API_KEY)")
         print("=" * 70)
         return
 

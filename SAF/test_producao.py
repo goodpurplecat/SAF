@@ -6,7 +6,7 @@ Duas partes:
    models.py estão consistentes com os guias (contagem de páginas,
    ordem dos blocos de vídeo, comportamento das dataclasses).
 2. Teste do pipeline completo (COM chamada de API) — espelha
-   test_tratamento.py: sem ANTHROPIC_API_KEY configurada neste ambiente,
+   test_tratamento.py: sem GEMINI_API_KEY configurada neste ambiente,
    a falha é esperada e é capturada explicitamente, não escondida.
 """
 
@@ -175,7 +175,7 @@ def teste_diagnostico_comparativo_no_prompt_sem_api():
     nenhuma percepção, o prompt não deve conter esse bloco — não é pra
     forçar nenhuma comparação. _montar_prompt_relatorio/_montar_prompt_roteiro
     só montam string (não chamam a API), então dá pra testar sem
-    ANTHROPIC_API_KEY.
+    GEMINI_API_KEY.
     """
     print("\n[7/8] IA de Relatório e Roteiro: Diagnóstico Comparativo entra/sai do prompt corretamente (sem API)...")
 
@@ -222,10 +222,10 @@ def teste_diagnostico_comparativo_no_prompt_sem_api():
 def teste_pipeline_completo_com_api():
     """
     Pipeline ponta a ponta: Motor de Diagnóstico → Departamento de Produção.
-    Ambiente sem ANTHROPIC_API_KEY: a falha na chamada de API é ESPERADA e
+    Ambiente sem GEMINI_API_KEY: a falha na chamada de API é ESPERADA e
     capturada aqui — mesma situação de test_tratamento.py.
     """
-    print("\n[8/8] Pipeline completo (Motor → Produção) — requer ANTHROPIC_API_KEY...")
+    print("\n[8/8] Pipeline completo (Motor → Produção) — requer GEMINI_API_KEY...")
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from financial_engine import FinancialDiagnosticEngine
@@ -273,14 +273,14 @@ def teste_pipeline_completo_com_api():
 
     try:
         resultado = depto.processar(TipoProduto.DIAGNOSTICO, dados_motor, cliente)
-        # Se ANTHROPIC_API_KEY estiver configurada de verdade, valida o resultado real:
+        # Se GEMINI_API_KEY estiver configurada de verdade, valida o resultado real:
         assert resultado.status in (StatusProducao.SUCESSO, StatusProducao.REVISAO_MANUAL_NECESSARIA)
         print(f"      ✅ Pipeline rodou de ponta a ponta com API real — status: {resultado.status.value}")
     except Exception as e:
-        # Esperado neste ambiente: sem ANTHROPIC_API_KEY, a chamada à IA de
+        # Esperado neste ambiente: sem GEMINI_API_KEY, a chamada à IA de
         # Relatório e Roteiro falha (mesmo comportamento de IAExtratora em
         # dp-01/tratamento/extratora.py — não engolimos o erro).
-        print(f"      ⚠️  Falha esperada sem ANTHROPIC_API_KEY neste ambiente: {type(e).__name__}")
+        print(f"      ⚠️  Falha esperada sem GEMINI_API_KEY neste ambiente: {type(e).__name__}")
         print("      (Isto NÃO é um bug — é a mesma limitação ambiental de test_tratamento.py.)")
 
 

@@ -270,7 +270,7 @@ class PipelineSAF:
         except Exception as e:
             # A IA Extratora (dp-01) chama a API de verdade e NÃO engole o
             # erro (ver extratora.py / test_tratamento.py) — sem
-            # ANTHROPIC_API_KEY configurada, isso é esperado; capturamos
+            # GEMINI_API_KEY configurada, isso é esperado; capturamos
             # aqui pra devolver o mesmo formato ResultadoPipeline de
             # qualquer outra parada de pipeline, em vez de propagar um
             # traceback cru pra quem chamou app.py.
@@ -704,7 +704,7 @@ def exemplo_uso():
     """
     Demonstra o pipeline INTEIRO de ponta a ponta (dp-01 → motor → dp-02 →
     dp-03) a partir de formulário + arquivos brutos, como um cliente real
-    enviaria. Sem ANTHROPIC_API_KEY configurada neste ambiente, a IA
+    enviaria. Sem GEMINI_API_KEY configurada neste ambiente, a IA
     Extratora (dp-01) falha na primeira chamada de API — comportamento
     ESPERADO aqui, igual test_tratamento.py/test_producao.py/test_edicao.py.
     """
