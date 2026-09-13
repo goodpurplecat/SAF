@@ -190,7 +190,19 @@ class DepartamentoEdicao:
         print(f"   → {'APROVADO' if revisao.aprovado else 'NÃO APROVADO'} "
               f"({len(revisao.bloqueadores)} bloqueador(es), {len(revisao.ajustes)} ajuste(s)))")
 
-        if revisao.aprovado:
+        # CORREÇÃO (auditoria 12/09/2026): sem ELEVENLABS_API_KEY configurada,
+        # IAAudio cai no modo placeholder — todo áudio do vídeo é silêncio
+        # (audio_generator.py::_gerar_silencio), só com a duração certa pra
+        # não travar o resto do pipeline em teste. O docstring de lá já dizia
+        # que isso "nunca é entregue ao cliente", mas nada aqui de fato
+        # impedia — a IA Fiscal de Produção só compara TEXTO (roteiro
+        # aprovado vs. montado), não ouve o áudio, então aprovaria
+        # normalmente um vídeo mudo. Este gate garante que SUCESSO nunca sai
+        # com narração placeholder, não importa o que a Fiscal conclua.
+        audio_placeholder = not self.audio.modo_real
+        aprovado_de_verdade = revisao.aprovado and not audio_placeholder
+
+        if aprovado_de_verdade:
             print("\n✅ PDF e vídeo finais aprovados — prontos pro cliente.")
             return ResultadoEdicao(
                 status=StatusEdicao.SUCESSO,
@@ -202,10 +214,16 @@ class DepartamentoEdicao:
                 revisao_fiscal_final=revisao,
                 tentativas=tentativa,
                 timestamp=datetime.now().isoformat(),
+                audio_placeholder=audio_placeholder,
             )
 
-        print("\n🔴 REPROVADO pela IA Fiscal de Produção — revisão manual necessária "
-              "(conteúdo já aprovado pelo dp-02; este departamento não reescreve).")
+        if audio_placeholder and revisao.aprovado:
+            print("\n🟠 Conteúdo aprovado pela IA Fiscal, mas o áudio do vídeo é "
+                  "placeholder (silêncio) — ELEVENLABS_API_KEY não configurada. "
+                  "Bloqueando envio automático ao cliente.")
+        else:
+            print("\n🔴 REPROVADO pela IA Fiscal de Produção — revisão manual necessária "
+                  "(conteúdo já aprovado pelo dp-02; este departamento não reescreve).")
         return ResultadoEdicao(
             status=StatusEdicao.REVISAO_MANUAL_NECESSARIA,
             tipo_produto=tipo_produto,
@@ -216,6 +234,7 @@ class DepartamentoEdicao:
             revisao_fiscal_final=revisao,
             tentativas=tentativa,
             timestamp=datetime.now().isoformat(),
+            audio_placeholder=audio_placeholder,
         )
 
     # ------------------------------------------------------------------

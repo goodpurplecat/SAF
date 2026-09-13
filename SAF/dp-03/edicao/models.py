@@ -58,6 +58,13 @@ class ResultadoEdicao:
     revisao_fiscal_final: Optional[RevisaoFiscalFinal] = None
     tentativas: int = 0
     timestamp: str = ""
+    # CORREÇÃO (auditoria 12/09/2026): sinaliza quando o vídeo foi montado
+    # com narração placeholder (áudio silencioso — ver audio_generator.py,
+    # IAAudio.modo_real) em vez de narração real do ElevenLabs. Ver
+    # DepartamentoEdicao.processar(): quando True, o status NUNCA fecha como
+    # SUCESSO, mesmo que a IA Fiscal aprove — silêncio no lugar da narração
+    # jamais deveria chegar a um cliente pagante.
+    audio_placeholder: bool = False
 
     def como_json(self) -> Dict[str, Any]:
         return {
@@ -68,6 +75,7 @@ class ResultadoEdicao:
             "video_path": self.video_path,
             "num_slides": len(self.slides),
             "aprovado_fiscal_final": self.revisao_fiscal_final.aprovado if self.revisao_fiscal_final else None,
+            "audio_placeholder": self.audio_placeholder,
             "tentativas": self.tentativas,
             "timestamp": self.timestamp,
         }

@@ -5,16 +5,36 @@ ou página de relatório) em PNG ou PDF. Determinístico — sem IA nenhuma aqui
 é só "tirar um print" do HTML gerado pelos templates.
 """
 
+import os
+
 from playwright.sync_api import sync_playwright
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
+
+# CORREÇÃO (auditoria 12/09/2026): o repo não tem Procfile/nixpacks.toml/
+# Dockerfile nenhum garantindo que `playwright install chromium` rode no
+# build do Railway (requirements.txt só instala o pacote Python; o binário
+# do Chromium é baixado à parte). Se o executável do Playwright não estiver
+# no caminho padrão em produção — ou em qualquer ambiente de teste com uma
+# revisão de browser diferente da que este playwright espera — as 3 chamadas
+# de p.chromium.launch() abaixo quebram com um erro só de infraestrutura,
+# nunca de conteúdo. PLAYWRIGHT_CHROMIUM_EXECUTABLE opcional permite apontar
+# pra um binário já instalado sem mudar nada em produção quando a variável
+# não está definida (comportamento padrão do Playwright, sem alteração).
+_CHROMIUM_EXECUTABLE = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+
+
+def _launch_chromium(p):
+    if _CHROMIUM_EXECUTABLE:
+        return p.chromium.launch(executable_path=_CHROMIUM_EXECUTABLE)
+    return p.chromium.launch()
 
 
 def render_html_to_png(html: str, out_path: Union[str, Path], width: int = 1920, height: int = 1080) -> str:
     """Renderiza um HTML autocontido pra um PNG de dimensão exata (ex: um slide de vídeo)."""
     out_path = str(out_path)
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = _launch_chromium(p)
         page = browser.new_page(viewport={"width": width, "height": height})
         page.set_content(html, wait_until="networkidle")
         page.screenshot(path=out_path)
@@ -73,7 +93,7 @@ def render_html_to_png_com_medicao(
     """
     out_path = str(out_path)
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = _launch_chromium(p)
         page = browser.new_page(viewport={"width": width, "height": height})
         page.set_content(html, wait_until="networkidle")
         page.screenshot(path=out_path)
@@ -109,7 +129,7 @@ def render_html_pages_to_pdf(
 
     writer = PdfWriter()
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = _launch_chromium(p)
         page = browser.new_page()
         with tempfile.TemporaryDirectory() as tmp:
             for i, pagina_html in enumerate(htmls):
