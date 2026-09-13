@@ -67,7 +67,14 @@ class DepartamentoTratamento:
             dados_originais_arquivos=arquivos_info
         )
         
-        relatorio_fiscal = self.fiscal.gerar_relatorio_revisao(validacao)
+        # CORREÇÃO (auditoria 12/09/2026): chamava `gerar_relatorio_revisao`,
+        # método que nunca existiu em IAFiscalDados (só `gerar_relatorio`) —
+        # toda vez que a Extratora tivesse sucesso de verdade (GEMINI_API_KEY
+        # configurada, como em produção), esta linha derrubava o pipeline
+        # inteiro com AttributeError, pra TODO cliente, sempre. Nenhum teste
+        # pegava isso porque, sem chave de API neste ambiente, a Extratora já
+        # falha antes de chegar aqui.
+        relatorio_fiscal = self.fiscal.gerar_relatorio(validacao)
         print(relatorio_fiscal)
         
         # Se tem bloqueadores, parar aqui
