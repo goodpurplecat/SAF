@@ -269,9 +269,12 @@ def teste_pipeline_completo_com_api():
         "categoria": config.business_category.value,
     }
 
-    depto = DepartamentoProducao(max_tentativas=1)
-
+    # CORREÇÃO (auditoria 12/09/2026): mesmo bug de test_tratamento.py —
+    # DepartamentoProducao() constrói IARelatorioRoteiro(), que chama
+    # genai.Client() no __init__; sem GEMINI_API_KEY isso quebra antes do
+    # try, então a construção também precisa estar dentro dele.
     try:
+        depto = DepartamentoProducao(max_tentativas=1)
         resultado = depto.processar(TipoProduto.DIAGNOSTICO, dados_motor, cliente)
         # Se GEMINI_API_KEY estiver configurada de verdade, valida o resultado real:
         assert resultado.status in (StatusProducao.SUCESSO, StatusProducao.REVISAO_MANUAL_NECESSARIA)

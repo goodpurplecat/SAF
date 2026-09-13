@@ -1,0 +1,25 @@
+# CORREÇÃO (auditoria 12/09/2026): o README já citava este arquivo como
+# existente, mas ele nunca tinha sido criado.
+
+# Segredos
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Saídas geradas pelo pipeline (PDF/vídeo/áudio/slides de teste) — só a
+# pasta padrão de saída, pra não ignorar sem querer um asset de verdade
+# (ex.: um mp3 de música de fundo) que alguém queira versionar em outro lugar.
+/saidas/
+
+# SO / editor
+.DS_Store
+.vscode/
+.idea/

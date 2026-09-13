@@ -54,6 +54,7 @@ Ver comentários "CORREÇÃO (05/09/2026, auditoria app.py)" em limpeza.py:
 
 import os
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -679,17 +680,29 @@ def _montar_channel_revenues(canais_raw: Dict[str, float]) -> Tuple[Dict[Any, fl
     return convertido, avisados
 
 
-_MESES_PT = {m.get_name().lower(): m for m in Month}
+def _sem_acento(texto: str) -> str:
+    return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+
+
+_MESES_PT = {_sem_acento(m.get_name().lower()): m for m in Month}
 
 
 def _mes_para_enum(texto_mes: str) -> Month:
     """
-    'Abril', 'abril', 'Abril/2026', 'ABRIL 2026' -> Month.ABR. Usa
-    correspondência por substring (o texto pode vir com ano/barra
-    anexados, como cliente.periodo_analisado normalmente traz) em vez de
-    igualdade exata.
+    'Abril', 'abril', 'Abril/2026', 'ABRIL 2026', 'Marco/2026' (sem cedilha)
+    -> Month.ABR/Month.MAR. Usa correspondência por substring (o texto pode
+    vir com ano/barra anexados, como cliente.periodo_analisado normalmente
+    traz) em vez de igualdade exata.
+
+    CORREÇÃO (auditoria 12/09/2026): a comparação era feita com o nome do
+    mês acentuado ("março"), então qualquer texto sem acento (comum em
+    extração de IA, formulários digitados sem acento, ou encoding perdido
+    em algum ponto do pipeline) falhava a detectar meses com acento
+    (março, é o único caso real em pt-BR) e derrubava a Mensalidade inteira
+    com "Mês não reconhecido". Normalizando os dois lados (removendo
+    acento) antes de comparar.
     """
-    texto_norm = (texto_mes or "").strip().lower()
+    texto_norm = _sem_acento((texto_mes or "").strip().lower())
     for nome_mes, m in _MESES_PT.items():
         if nome_mes in texto_norm:
             return m

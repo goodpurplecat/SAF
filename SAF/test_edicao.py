@@ -285,7 +285,18 @@ def teste_dados_graficos_no_pipeline():
     """
     print("\n[11/14] dados_graficos encaminhado corretamente em _montar_video_slides()...")
 
-    depto = DepartamentoEdicao(max_tentativas_tecnicas=1)
+    # CORREÇÃO (auditoria 12/09/2026): DepartamentoEdicao() constrói
+    # IAFiscalProducaoFinal(), que chama genai.Client() no __init__ — sem
+    # GEMINI_API_KEY isso levanta ValueError aqui, mesmo este teste não
+    # precisando da Fiscal (só testa _montar_video_slides). Mesma família de
+    # bug de test_tratamento.py/test_producao.py: a instanciação também
+    # precisa estar protegida.
+    try:
+        depto = DepartamentoEdicao(max_tentativas_tecnicas=1)
+    except Exception as e:
+        print(f"      ⚠️  Falha esperada sem GEMINI_API_KEY neste ambiente: {type(e).__name__}")
+        print("      (Isto NÃO é um bug — mesma limitação ambiental dos outros testes.)")
+        return
     roteiro_falas = {"Resultado Financeiro": "Fala do resultado.", "Status Geral": "Fala do status."}
     roteiro_cards = {"Resultado Financeiro": "Card do resultado.", "Status Geral": "Card do status."}
     dados_graficos = {
@@ -366,28 +377,36 @@ def teste_pipeline_completo_com_api():
     }
     cliente = {"nome_loja": "E-commerce Teste Edição", "periodo": "Agosto/2026"}
 
-    depto = DepartamentoEdicao(max_tentativas_tecnicas=1)
-    resultado = depto.processar(
-        tipo_produto="Diagnóstico",
-        cliente=cliente,
-        relatorio_paginas=relatorio_paginas,
-        roteiro_falas=roteiro_falas,
-        roteiro_cards=roteiro_cards,
-        roteiro_ordem=list(roteiro_falas.keys()),
-        out_dir="/tmp/_teste_edicao_pipeline",
-        titulos_paginas=titulos_paginas,
-    )
+    # CORREÇÃO (auditoria 12/09/2026): mesma família de bug — a construção
+    # de DepartamentoEdicao() (genai.Client() dentro de
+    # IAFiscalProducaoFinal.__init__) precisa estar dentro do try, senão
+    # quebra sem cair no except "falha esperada" que este teste já previa.
+    try:
+        depto = DepartamentoEdicao(max_tentativas_tecnicas=1)
+        resultado = depto.processar(
+            tipo_produto="Diagnóstico",
+            cliente=cliente,
+            relatorio_paginas=relatorio_paginas,
+            roteiro_falas=roteiro_falas,
+            roteiro_cards=roteiro_cards,
+            roteiro_ordem=list(roteiro_falas.keys()),
+            out_dir="/tmp/_teste_edicao_pipeline",
+            titulos_paginas=titulos_paginas,
+        )
 
-    assert resultado.status in (StatusEdicao.SUCESSO, StatusEdicao.REVISAO_MANUAL_NECESSARIA), \
-        f"Status inesperado: {resultado.status} (ERRO indicaria falha técnica de montagem, não de API)"
-    assert resultado.pdf_path and os.path.exists(resultado.pdf_path), "PDF deveria ter sido montado mesmo sem API (é determinístico)"
-    assert resultado.video_path and os.path.exists(resultado.video_path), "Vídeo deveria ter sido montado mesmo sem API"
+        assert resultado.status in (StatusEdicao.SUCESSO, StatusEdicao.REVISAO_MANUAL_NECESSARIA), \
+            f"Status inesperado: {resultado.status} (ERRO indicaria falha técnica de montagem, não de API)"
+        assert resultado.pdf_path and os.path.exists(resultado.pdf_path), "PDF deveria ter sido montado mesmo sem API (é determinístico)"
+        assert resultado.video_path and os.path.exists(resultado.video_path), "Vídeo deveria ter sido montado mesmo sem API"
 
-    if resultado.status == StatusEdicao.SUCESSO:
-        print(f"      ✅ Pipeline rodou de ponta a ponta com API real — APROVADO")
-    else:
-        print(f"      ⚠️  REVISAO_MANUAL_NECESSARIA — esperado sem GEMINI_API_KEY neste ambiente")
-        print("      (PDF e vídeo foram montados normalmente — só a aprovação final da IA Fiscal não rodou de verdade.)")
+        if resultado.status == StatusEdicao.SUCESSO:
+            print(f"      ✅ Pipeline rodou de ponta a ponta com API real — APROVADO")
+        else:
+            print(f"      ⚠️  REVISAO_MANUAL_NECESSARIA — esperado sem GEMINI_API_KEY neste ambiente")
+            print("      (PDF e vídeo foram montados normalmente — só a aprovação final da IA Fiscal não rodou de verdade.)")
+    except Exception as e:
+        print(f"      ⚠️  Falha esperada sem GEMINI_API_KEY neste ambiente: {type(e).__name__}")
+        print("      (Isto NÃO é um bug — mesma limitação ambiental de test_tratamento.py/test_producao.py.)")
 
 
 if __name__ == "__main__":

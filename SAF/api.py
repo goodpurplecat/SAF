@@ -13,6 +13,7 @@ Variáveis de ambiente necessárias (ver .env.example):
 
 import os
 import json
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -59,11 +60,24 @@ app.add_middleware(
 # sabe fazer loop + fade de uma música por baixo da narração
 # (dp-03/edicao/video_assembler.py), mas o pipeline era instanciado sem
 # musica_path — nenhum vídeo saía com música, mesmo o recurso pronto.
-# Agora lê de MUSICA_BACKGROUND_PATH; segue None (comportamento antigo,
-# sem música) até essa variável apontar para um arquivo de áudio de
-# verdade (mp3/wav de fundo, sem letra) — ver AUDIO_CONFIG em
-# dp-03/edicao/design_config.py para volume/fade.
-MUSICA_BACKGROUND_PATH = os.environ.get("MUSICA_BACKGROUND_PATH")
+#
+# ATUALIZAÇÃO (13/09/2026): pra não depender de configurar variável de
+# ambiente no Railway, agora existe um caminho padrão dentro do próprio
+# repositório: dp-03/edicao/assets/musica_fundo.mp3. Basta subir o
+# arquivo de música (mp3, sem letra/vocal, tipo lofi/corporativo baixo)
+# nesse caminho exato pelo GitHub e fazer o deploy — o pipeline usa esse
+# arquivo automaticamente, sem precisar mexer em nada no Railway.
+# MUSICA_BACKGROUND_PATH continua funcionando como opção manual (tem
+# prioridade sobre o arquivo padrão, útil pra trocar a música sem commit
+# ou apontar pra um caminho fora do repo). Volume/fade ficam em
+# AUDIO_CONFIG, dp-03/edicao/design_config.py (hoje: 17% de volume,
+# fade-in de 2s, fade-out de 3s).
+_MUSICA_PADRAO = os.path.join(
+    os.path.dirname(__file__), "dp-03", "edicao", "assets", "musica_fundo.mp3"
+)
+MUSICA_BACKGROUND_PATH = os.environ.get("MUSICA_BACKGROUND_PATH") or (
+    _MUSICA_PADRAO if os.path.isfile(_MUSICA_PADRAO) else None
+)
 
 pipeline = PipelineSAF(musica_path=MUSICA_BACKGROUND_PATH)
 sdk_mp = mercadopago.SDK(os.environ["MERCADOPAGO_ACCESS_TOKEN"])
@@ -73,9 +87,12 @@ sdk_mp = mercadopago.SDK(os.environ["MERCADOPAGO_ACCESS_TOKEN"])
 # — usada só pra validar a assinatura de quem está chamando o webhook.
 MERCADOPAGO_WEBHOOK_SECRET = os.environ["MERCADOPAGO_WEBHOOK_SECRET"]
 
+# ATUALIZAÇÃO (13/09/2026): preço de lançamento/beta — R$800 (Diagnóstico) e
+# R$1.200 (Mensalidade). Manter sincronizado com contrato.html, mensal.html,
+# termos.html e termos-mensal.html no repo do site.
 PRECOS = {
-    "Diagnóstico": 1800.00,
-    "Mensalidade": 2700.00,
+    "Diagnóstico": 800.00,
+    "Mensalidade": 1200.00,
 }
 
 
@@ -184,7 +201,14 @@ async def webhook_pagamento(request: Request, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(cliente)
 
-    link = f"{FRONTEND_URL}/entrar/confirmar?token={gerar_link_login(email)}"
+    # CORREÇÃO (auditoria 12/09/2026): o link apontava pro FRONTEND
+    # (finspots.com.br/entrar/confirmar), uma página que não existe no site
+    # estático — quem clicasse caía num 404, nunca conseguindo entrar.
+    # O endpoint que de fato valida o token e cria a sessão é
+    # GET /auth/confirmar, que só existe nesta API — o link precisa apontar
+    # pra cá (API_URL), não pro site. Este endpoint já redireciona pro
+    # FRONTEND_URL/minha-area sozinho depois de validar (ver /auth/confirmar).
+    link = f"{os.environ['API_URL']}/auth/confirmar?token={gerar_link_login(email)}"
     enviar_link_login(email, link)
 
     return {"status": "processado"}
@@ -198,7 +222,10 @@ async def webhook_pagamento(request: Request, db: Session = Depends(get_db)):
 def solicitar_link(email: str, db: Session = Depends(get_db)):
     cliente = db.query(Cliente).filter_by(email=email).first()
     if cliente:
-        link = f"{FRONTEND_URL}/entrar/confirmar?token={gerar_link_login(email)}"
+        # CORREÇÃO (auditoria 12/09/2026): mesmo bug do webhook — link tem
+        # que apontar pro endpoint que valida o token (API_URL/auth/confirmar),
+        # não pro FRONTEND_URL (onde essa rota não existe).
+        link = f"{os.environ['API_URL']}/auth/confirmar?token={gerar_link_login(email)}"
         enviar_link_login(email, link)
     # Mesma resposta se o email existir ou não — evita confirmar pra
     # quem tá tentando adivinhar emails de clientes cadastrados.
@@ -222,7 +249,15 @@ def confirmar_link(token: str, db: Session = Depends(get_db)):
         gerar_sessao(cliente.id),
         httponly=True,
         secure=True,
-        samesite="lax",
+        # CORREÇÃO (auditoria 12/09/2026): com samesite="lax", o navegador
+        # não manda este cookie em chamadas fetch()/XHR entre sites — e é
+        # exatamente assim que o frontend (finspots.com.br) chama esta API
+        # (domínio separado, Railway). Resultado: o cliente "entra" (recebe
+        # o cookie aqui), mas toda chamada seguinte da área dele
+        # (/minha-area/relatorios, /processar) volta 401, como se nunca
+        # tivesse logado. samesite="none" exige secure=True, que já estava
+        # presente.
+        samesite="none",
         max_age=30 * 24 * 60 * 60,
     )
     return resposta
@@ -295,11 +330,20 @@ def _processar_em_segundo_plano(
             dados_motor_periodo_anterior=dados_motor_anterior,
         )
 
-        relatorio = Relatorio(cliente_id=cliente_id, tipo_produto=tipo_produto)
+        # CORREÇÃO (auditoria 12/09/2026): `relatorio.id` era lido AQUI, antes
+        # de db.add()/db.commit() — o default (SQLAlchemy Column(default=...))
+        # só é aplicado no flush/commit, então `relatorio.id` valia `None`
+        # neste ponto, sempre. Toda chave R2 saía como "relatorios/None/...",
+        # e cada novo relatório (de QUALQUER cliente) sobrescrevia o PDF/vídeo
+        # do relatório anterior no mesmo caminho fixo — risco real de um
+        # cliente ver o relatório de outro. Gerando o id explicitamente antes
+        # de montar as chaves, cada relatório fica isolado de verdade.
+        relatorio_id = str(uuid.uuid4())
+        relatorio = Relatorio(id=relatorio_id, cliente_id=cliente_id, tipo_produto=tipo_produto)
 
         if resultado.status == "SUCESSO":
-            chave_pdf = f"relatorios/{relatorio.id}/relatorio.pdf"
-            chave_video = f"relatorios/{relatorio.id}/video.mp4"
+            chave_pdf = f"relatorios/{relatorio_id}/relatorio.pdf"
+            chave_video = f"relatorios/{relatorio_id}/video.mp4"
             subir_arquivo(resultado.resultado_edicao.pdf_path, chave_pdf)
             subir_arquivo(resultado.resultado_edicao.video_path, chave_video)
             relatorio.pdf_chave_r2 = chave_pdf
@@ -309,7 +353,7 @@ def _processar_em_segundo_plano(
             db.add(relatorio)
             db.commit()
 
-            link = f"{FRONTEND_URL}/entrar/confirmar?token={gerar_link_login(email)}"
+            link = f"{os.environ['API_URL']}/auth/confirmar?token={gerar_link_login(email)}"
             enviar_relatorio_pronto(email, link)
 
         elif resultado.status == "REVISAO_MANUAL_NECESSARIA":

@@ -367,8 +367,14 @@ def teste_completo():
     ]
     
     # Processar
-    depto = DepartamentoTratamento()
+    # CORREÇÃO (auditoria 12/09/2026): DepartamentoTratamento() constrói
+    # IAExtratora(), que chama genai.Client() já no __init__ — sem
+    # GEMINI_API_KEY, isso levanta ValueError ANTES de qualquer coisa
+    # entrar no try abaixo, então o teste quebrava sem cair no except
+    # "falha esperada" que ele mesmo já previa. Movendo a construção pra
+    # dentro do try.
     try:
+        depto = DepartamentoTratamento()
         resultado = depto.processar_cliente(
             tipo_produto=TipoProduto.DIAGNOSTICO,
             respostas_formulario=formulario_teste,
