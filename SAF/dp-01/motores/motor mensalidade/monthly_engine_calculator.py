@@ -54,14 +54,19 @@ class MonthlyCalculator:
         # Custos Fixos e Pró-labore
         fixed_costs = input_data.fixed_costs
         pro_labore = input_data.pro_labore
-        
+
+        # CORREÇÃO (auditoria 13/09/2026, confirmado pela analista — mesmo
+        # ajuste do motor de Diagnóstico): investimento em ads desconta do
+        # Lucro Líquido quando existe, sem afetar a Margem de Contribuição.
+        ads_investment = input_data.ads_investment
+
         # Lucro Líquido
-        profit_net = contribution_margin - fixed_costs - pro_labore
-        
+        profit_net = contribution_margin - fixed_costs - pro_labore - ads_investment
+
         # Percentuais
         cm_pct = contribution_margin / revenue_net if revenue_net > 0 else 0
         ml_pct = profit_net / revenue_net if revenue_net > 0 else 0
-        
+
         return {
             'revenue_gross': revenue_gross,
             'returns_cancellations': returns_cancellations,
@@ -74,6 +79,7 @@ class MonthlyCalculator:
             'contribution_margin_pct': cm_pct,
             'fixed_costs': fixed_costs,
             'pro_labore': pro_labore,
+            'ads_investment': ads_investment,
             'profit_net': profit_net,
             'profit_net_pct': ml_pct,
         }
@@ -126,6 +132,7 @@ class MonthlyCalculator:
             'profit_net': profit_net,
             'breakeven': breakeven,
             'avg_ticket': avg_ticket,
+            'ads_investment': ads_investment,
             'roas': roas,
             'roas_breakeven': roas_breakeven,
             'cac': cac,

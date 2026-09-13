@@ -144,6 +144,7 @@ class MonthlyDiagnosticEngineMain:
         summary.profit_margin_pct = metrics['profit_margin_pct']
         summary.profit_net = metrics['profit_net']
         summary.breakeven_revenue = metrics['breakeven']
+        summary.ads_investment = metrics['ads_investment']
         summary.roas = metrics['roas']
         summary.cac = metrics['cac']
         
@@ -205,6 +206,9 @@ class MonthlyDiagnosticEngineMain:
                 'profit_margin_pct': float(summary.profit_margin_pct),
                 'profit_net': float(summary.profit_net),
                 'breakeven': float(summary.breakeven_revenue),
+                # CORREÇÃO (auditoria 13/09/2026): já descontado de profit_net
+                # acima — exposto aqui pra coerência com a seção 'marketing'.
+                'ads_investment_deducted': float(summary.ads_investment),
             },
             
             'marketing': {

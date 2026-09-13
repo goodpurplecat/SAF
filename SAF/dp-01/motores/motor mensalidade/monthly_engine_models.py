@@ -217,7 +217,12 @@ class MonthlySummary:
     profit_margin_pct: float = 0.0
     profit_net: float = 0.0
     breakeven_revenue: float = 0.0
-    
+    # CORREÇÃO (auditoria 13/09/2026): valor de ads já descontado do
+    # profit_net acima — exposto aqui também pra quem gera o texto do
+    # relatório poder dizer "já descontado o investimento em ads" (mesmo
+    # ajuste do motor de Diagnóstico).
+    ads_investment: float = 0.0
+
     # Marketing
     roas: float = 0.0
     cac: float = 0.0

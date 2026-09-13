@@ -343,15 +343,23 @@ class MonthlyInsightGenerator:
         )
         
         # 2. LUCRATIVIDADE
+        # CORREÇÃO (auditoria 13/09/2026): metrics['profit_net'] já desconta
+        # o investimento em ads (mesmo ajuste do motor de Diagnóstico) — nota
+        # explícita no texto quando existe ads, pra não ficar incoerente com
+        # o que é dito sobre ROAS em outro bloco.
+        nota_ads = (
+            f" (já descontado o investimento de R$ {metrics['ads_investment']:,.2f} em anúncios)"
+            if metrics.get('ads_investment', 0) > 0 else ""
+        )
         if metrics['profit_net'] >= 0:
             insights['LUCRATIVIDADE'] = (
                 f"Lucro líquido de R$ {metrics['profit_net']:,.2f} "
-                f"({metrics['profit_margin_pct']:.1%} de margem). "
+                f"({metrics['profit_margin_pct']:.1%} de margem){nota_ads}. "
                 f"{'Ótimo resultado!' if metrics['profit_margin_pct'] > 0.20 else 'Há espaço para melhorar.'}"
             )
         else:
             insights['LUCRATIVIDADE'] = (
-                f"PREJUÍZO de R$ {abs(metrics['profit_net']):,.2f}. "
+                f"PREJUÍZO de R$ {abs(metrics['profit_net']):,.2f}{nota_ads}. "
                 f"Ação imediata necessária."
             )
         
