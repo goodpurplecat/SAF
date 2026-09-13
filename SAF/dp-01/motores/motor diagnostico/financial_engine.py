@@ -234,7 +234,13 @@ class FinancialDiagnosticEngine:
                 'profit_net': {
                     'amount': float(diagnostic.dre.profit_net),
                     'percentage': float(diagnostic.dre.profit_net_pct),
-                    'status': diagnostic.summary.overall_status.value
+                    'status': diagnostic.summary.overall_status.value,
+                    # CORREÇÃO (auditoria 13/09/2026): exposto explicitamente
+                    # pra quem gera o texto do relatório poder dizer "já
+                    # descontado o investimento em ads" e não ficar
+                    # incoerente com a seção de MARKETING (que já mostrava
+                    # esse mesmo valor via 'marketing.ads_investment' abaixo).
+                    'ads_investment_deducted': float(diagnostic.dre.ads_investment),
                 },
                 'breakeven_revenue': float(diagnostic.summary.breakeven_revenue),
             },

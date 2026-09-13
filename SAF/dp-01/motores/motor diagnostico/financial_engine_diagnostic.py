@@ -308,10 +308,20 @@ class InsightGenerator:
     
     def _lucratividade(self, dre: DREResults) -> str:
         """Bloco 2: LUCRATIVIDADE"""
+        # CORREÇÃO (auditoria 13/09/2026): dre.profit_net já desconta o
+        # investimento em ads (ver financial_engine_calculator.py). Deixamos
+        # isso explícito no texto quando existe ads, pra não parecer
+        # incoerente com o Bloco 5 (MARKETING), que discute ROAS como se o
+        # gasto com anúncios fosse um custo de verdade — porque agora é,
+        # também aqui.
+        nota_ads = (
+            f" (já descontado o investimento de R$ {dre.ads_investment:,.2f} em anúncios)"
+            if dre.ads_investment > 0 else ""
+        )
         if dre.profit_net >= 0:
             insight = (
                 f"Lucro líquido de R$ {dre.profit_net:,.2f} "
-                f"({dre.profit_net_pct:.1%} de margem). "
+                f"({dre.profit_net_pct:.1%} de margem){nota_ads}. "
             )
             if dre.profit_net_pct < self.config.ml_good_threshold:
                 insight += "Há espaço importante para melhorar a margem."
@@ -319,11 +329,11 @@ class InsightGenerator:
                 insight += "Boa performance de margem."
         else:
             insight = (
-                f"PREJUÍZO de R$ {abs(dre.profit_net):,.2f}. "
+                f"PREJUÍZO de R$ {abs(dre.profit_net):,.2f}{nota_ads}. "
                 f"O negócio está gastando mais do que fatura. "
                 f"Ação imediata necessária."
             )
-        
+
         return insight
     
     def _margem_contribuicao(self, dre: DREResults, summary: DiagnosticSummary) -> str:

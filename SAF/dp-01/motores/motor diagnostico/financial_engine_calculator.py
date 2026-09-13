@@ -132,10 +132,21 @@ class FinancialCalculator:
         
         # Pró-labore
         dre.pro_labore = valid_data.pro_labore
-        
+
+        # CORREÇÃO (auditoria 13/09/2026, confirmado pela analista): quando o
+        # cliente investe em ads, isso é custo de verdade e desconta do Lucro
+        # Líquido — antes esse valor só alimentava as métricas de MARKETING
+        # (ROAS/CAC/LTV) e nunca reduzia o lucro mostrado no DRE, inflando o
+        # "Lucro Líquido" pra qualquer loja que roda anúncios. Não entra na
+        # Margem de Contribuição (ver DREResults.ads_investment) — é uma
+        # linha própria, descontada só na conta final, igual a planilha
+        # original também não desconta ads em nenhuma etapa antes do Lucro
+        # Líquido.
+        dre.ads_investment = valid_data.ads_investment
+
         # Lucro Líquido
-        dre.profit_net = dre.contribution_margin - dre.fixed_costs - dre.pro_labore
-        
+        dre.profit_net = dre.contribution_margin - dre.fixed_costs - dre.pro_labore - dre.ads_investment
+
         # Cálculo de percentuais (se receita líquida > 0)
         if dre.revenue_net > 0:
             dre.tax_pct = dre.taxes / dre.revenue_net
@@ -145,8 +156,9 @@ class FinancialCalculator:
             dre.contribution_margin_pct = dre.contribution_margin / dre.revenue_net
             dre.fixed_costs_pct = dre.fixed_costs / dre.revenue_net
             dre.pro_labore_pct = dre.pro_labore / dre.revenue_net
+            dre.ads_investment_pct = dre.ads_investment / dre.revenue_net
             dre.profit_net_pct = dre.profit_net / dre.revenue_net
-        
+
         return dre
     
     # ========================

@@ -414,8 +414,17 @@ class DREResults:
     
     fixed_costs: float = 0.0
     pro_labore: float = 0.0
+    # CORREÇÃO (auditoria 13/09/2026, confirmado pela analista contra a
+    # planilha Diagnostico.xlsx original): investimento em ads é dinheiro de
+    # verdade saindo do caixa do cliente — quando ele existe, tem que
+    # descontar do Lucro Líquido. Fica de fora da Margem de Contribuição de
+    # propósito (ela é definida só com os custos variáveis operacionais —
+    # plataforma+frete+embalagem+comissões — nunca incluiu ads, nem na
+    # planilha original) e entra como uma linha própria, igual custos
+    # fixos/pró-labore, só na conta final.
+    ads_investment: float = 0.0
     profit_net: float = 0.0
-    
+
     # Percentuais
     tax_pct: float = 0.0
     cmv_pct: float = 0.0
@@ -424,6 +433,7 @@ class DREResults:
     contribution_margin_pct: float = 0.0
     fixed_costs_pct: float = 0.0
     pro_labore_pct: float = 0.0
+    ads_investment_pct: float = 0.0
     profit_net_pct: float = 0.0
 
 
