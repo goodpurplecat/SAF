@@ -31,6 +31,7 @@ class MonthlyDiagnosticEngineMain:
         sales_intel: SalesIntelligence,
         previous_month_metrics: Optional[Dict[str, float]] = None,
         recurring_pct_history: Optional[List[float]] = None,
+        product_breakdown: Optional[List[ProductAggregate]] = None,
     ) -> CompleteMonthlyDiagnostic:
         """
         Executa diagnóstico mensal completo
@@ -41,6 +42,7 @@ class MonthlyDiagnosticEngineMain:
         2B. Deriva a Categoria do negócio (A-E) automaticamente, a partir do
             ticket médio e da margem de contribuição do mês (novidade 04/09/2026)
         3. Calcula Comparativos vs mês anterior
+        3B. Calcula Fluxo de Caixa do mês (novidade 14/09/2026)
         4. Gera Alertas
         5. Gera Insights
         6. Consolida Resumo
@@ -51,13 +53,25 @@ class MonthlyDiagnosticEngineMain:
         queda pontual de um único mês (novidade 04/09/2026, ver
         monthly_engine_diagnostic.py). Opcional — sem isso, o S1 avalia só
         o mês atual, como antes.
+
+        product_breakdown: detalhamento por produto do mês (ver
+        ProductAggregate em monthly_engine_models.py) — normalmente vem de
+        sales_intelligence_calculator.calculate_sales_intelligence(),
+        junto com o próprio `sales_intel`. NOVIDADE (auditoria 14/09/2026):
+        opcional e independente de `sales_intel` de propósito — quem já
+        preenche SalesIntelligence à mão (fluxo atual, enquanto o
+        formulário/upload de vendas por pedido não existe) pode continuar
+        chamando este método exatamente como antes, sem essa lista. Sem
+        ela, o relatório mensal continua funcionando normalmente; só o
+        ranking anual (annual_engine.py) fica sem dado para aquele mês.
         """
-        
+
         diagnostic = CompleteMonthlyDiagnostic(
             config=self.config,
             reference_month=reference_month,
             monthly_input=monthly_input,
             sales_intelligence=sales_intel,
+            product_breakdown=product_breakdown or [],
         )
         
         # Validar
@@ -113,12 +127,53 @@ class MonthlyDiagnosticEngineMain:
                 metrics['profit_net'],
                 previous_month_metrics.get('profit_net', 0)
             )
-        
+            # NOVIDADE (auditoria 14/09/2026): faltavam 5 dos 9 indicadores
+            # da EVOLUÇÃO FINANCEIRA planejada (motores.pdf) — breakeven,
+            # ticket médio, ROAS, CAC e LTV:CAC já eram calculados todo mês
+            # (bloco 2 acima) mas nunca comparados ao mês anterior. Mesmo
+            # padrão dos 4 comparativos acima; fica de fora (chave ausente)
+            # quando o indicador não existe no mês anterior (ex.: cliente
+            # sem investimento em ads), igual ao comportamento de 'roas'/'cac'
+            # em calculate_metrics_for_month().
+            comparatives['breakeven'] = self.calculator.calculate_comparative(
+                metrics['breakeven'],
+                previous_month_metrics.get('breakeven', 0)
+            )
+            comparatives['avg_ticket'] = self.calculator.calculate_comparative(
+                metrics['avg_ticket'],
+                previous_month_metrics.get('avg_ticket', 0)
+            )
+            if metrics.get('roas', 0) > 0 or previous_month_metrics.get('roas', 0) > 0:
+                comparatives['roas'] = self.calculator.calculate_comparative(
+                    metrics.get('roas', 0),
+                    previous_month_metrics.get('roas', 0)
+                )
+            if metrics.get('cac', 0) > 0 or previous_month_metrics.get('cac', 0) > 0:
+                comparatives['cac'] = self.calculator.calculate_comparative(
+                    metrics.get('cac', 0),
+                    previous_month_metrics.get('cac', 0)
+                )
+            if metrics.get('ltv_cac', 0) > 0 or previous_month_metrics.get('ltv_cac', 0) > 0:
+                comparatives['ltv_cac'] = self.calculator.calculate_comparative(
+                    metrics.get('ltv_cac', 0),
+                    previous_month_metrics.get('ltv_cac', 0)
+                )
+
+        # ========================
+        # 3B. CALCULAR FLUXO DE CAIXA MENSAL
+        # NOVIDADE (auditoria 14/09/2026) — ver calculate_cashflow_for_month()
+        # em monthly_engine_calculator.py e MonthlyCashFlowAnalysis em
+        # monthly_engine_models.py. Antes desta correção, avg_collection_period
+        # e avg_payment_period eram coletados em MonthlyFinancialInput e nunca
+        # usados em lugar nenhum do motor mensal.
+        # ========================
+        cashflow = self.calculator.calculate_cashflow_for_month(monthly_input, dre)
+
         # ========================
         # 4. CALCULAR METAS
         # ========================
         goals = self.calculator.calculate_goals(metrics, self.config, reference_month)
-        
+
         # ========================
         # 5. GERAR ALERTAS
         # ========================
@@ -128,8 +183,9 @@ class MonthlyDiagnosticEngineMain:
             sales_intel,
             previous_month_metrics,
             recurring_pct_history,
+            cashflow,
         )
-        
+
         # ========================
         # 6. MONTAR RESUMO
         # ========================
@@ -147,7 +203,13 @@ class MonthlyDiagnosticEngineMain:
         summary.ads_investment = metrics['ads_investment']
         summary.roas = metrics['roas']
         summary.cac = metrics['cac']
-        
+        summary.ltv = metrics['ltv']
+        summary.ltv_cac = metrics['ltv_cac']
+        summary.avg_ticket = metrics['avg_ticket']
+
+        # Fluxo de Caixa (NOVIDADE 14/09/2026)
+        summary.cashflow = cashflow
+
         # Comparativos
         if comparatives:
             summary.revenue_comparative = comparatives.get('revenue_net', MonthlyComparative())
@@ -159,20 +221,29 @@ class MonthlyDiagnosticEngineMain:
             # disponível pra tabela do bloco COMPARATIVO FINANCEIRO.
             summary.profit_margin_comparative = comparatives.get('profit_margin_pct', MonthlyComparative())
             summary.profit_comparative = comparatives.get('profit_net', MonthlyComparative())
-        
+            # NOVIDADE (auditoria 14/09/2026): completa os 9 indicadores da
+            # EVOLUÇÃO FINANCEIRA planejada (motores.pdf) — ver bloco "3.
+            # CALCULAR COMPARATIVOS" acima.
+            summary.breakeven_comparative = comparatives.get('breakeven', MonthlyComparative())
+            summary.avg_ticket_comparative = comparatives.get('avg_ticket', MonthlyComparative())
+            summary.roas_comparative = comparatives.get('roas', MonthlyComparative())
+            summary.cac_comparative = comparatives.get('cac', MonthlyComparative())
+            summary.ltv_cac_comparative = comparatives.get('ltv_cac', MonthlyComparative())
+
         # Inteligência de Vendas
         summary.sales_intel = sales_intel
-        
+
         # Top 3 alertas
         summary.top_3_alerts = self.diagnostic_engine.get_top_3_priorities(alerts)
-        
+
         # Insights
         summary.insights = self.insight_generator.generate_all_insights(
             reference_month,
             metrics,
             comparatives,
             sales_intel,
-            summary
+            summary,
+            cashflow,
         )
         
         # ========================
@@ -214,8 +285,22 @@ class MonthlyDiagnosticEngineMain:
             'marketing': {
                 'roas': float(summary.roas) if summary.roas > 0 else None,
                 'cac': float(summary.cac) if summary.cac > 0 else None,
+                'ltv': float(summary.ltv) if summary.ltv > 0 else None,
+                'ltv_cac': float(summary.ltv_cac) if summary.ltv_cac > 0 else None,
             },
-            
+
+            # NOVIDADE (auditoria 14/09/2026) — ver MonthlyCashFlowAnalysis /
+            # calculate_cashflow_for_month(). Antes desta correção, esta
+            # chave não existia: PMR/PMP eram coletados e nunca chegavam a
+            # lugar nenhum do export.
+            'cashflow': {
+                'avg_collection_period': float(summary.cashflow.avg_collection_period),
+                'avg_payment_period': float(summary.cashflow.avg_payment_period),
+                'financial_cycle': float(summary.cashflow.financial_cycle),
+                'cycle_status': summary.cashflow.cycle_status,
+                'profit_vs_cash_alert': summary.cashflow.profit_vs_cash_alert,
+            },
+
             # CORREÇÃO (auditoria 05/09/2026): esta seção só exportava 2 dos
             # 4 indicadores comparativos que a página/bloco "COMPARATIVO
             # FINANCEIRO" (templates.py) precisa — e o que existia estava
@@ -254,6 +339,44 @@ class MonthlyDiagnosticEngineMain:
                     'variation': float(summary.profit_comparative.variation),
                     'variation_pct': float(summary.profit_comparative.variation_pct),
                     'status': summary.profit_comparative.status,
+                },
+                # NOVIDADE (auditoria 14/09/2026): completa os 9 indicadores
+                # da EVOLUÇÃO FINANCEIRA planejada (motores.pdf) — ver
+                # MonthlySummary.breakeven_comparative e vizinhos.
+                'breakeven': {
+                    'current': float(summary.breakeven_comparative.current_month_value),
+                    'previous': float(summary.breakeven_comparative.previous_month_value),
+                    'variation': float(summary.breakeven_comparative.variation),
+                    'variation_pct': float(summary.breakeven_comparative.variation_pct),
+                    'status': summary.breakeven_comparative.status,
+                },
+                'avg_ticket': {
+                    'current': float(summary.avg_ticket_comparative.current_month_value),
+                    'previous': float(summary.avg_ticket_comparative.previous_month_value),
+                    'variation': float(summary.avg_ticket_comparative.variation),
+                    'variation_pct': float(summary.avg_ticket_comparative.variation_pct),
+                    'status': summary.avg_ticket_comparative.status,
+                },
+                'roas': {
+                    'current': float(summary.roas_comparative.current_month_value),
+                    'previous': float(summary.roas_comparative.previous_month_value),
+                    'variation': float(summary.roas_comparative.variation),
+                    'variation_pct': float(summary.roas_comparative.variation_pct),
+                    'status': summary.roas_comparative.status,
+                },
+                'cac': {
+                    'current': float(summary.cac_comparative.current_month_value),
+                    'previous': float(summary.cac_comparative.previous_month_value),
+                    'variation': float(summary.cac_comparative.variation),
+                    'variation_pct': float(summary.cac_comparative.variation_pct),
+                    'status': summary.cac_comparative.status,
+                },
+                'ltv_cac': {
+                    'current': float(summary.ltv_cac_comparative.current_month_value),
+                    'previous': float(summary.ltv_cac_comparative.previous_month_value),
+                    'variation': float(summary.ltv_cac_comparative.variation),
+                    'variation_pct': float(summary.ltv_cac_comparative.variation_pct),
+                    'status': summary.ltv_cac_comparative.status,
                 },
             },
             
@@ -307,6 +430,26 @@ class MonthlyDiagnosticEngineMain:
             ],
             
             'insights': summary.insights,
+
+            # NOVIDADE (auditoria 14/09/2026): detalhamento completo por
+            # produto do mês — não só o Top 3 de 'sales_intelligence' acima.
+            # É esta lista, persistida em Relatorio.dados_motor_json
+            # (database.py) mês a mês, que annual_engine.py consome pra
+            # montar o ranking anual de mais vendidos por ID. Vem vazia
+            # ([]) quando o mês foi rodado sem product_breakdown (fluxo
+            # atual, com SalesIntelligence preenchido à mão) — não quebra
+            # nada, só significa que aquele mês não entra no ranking anual.
+            'product_breakdown': [
+                {
+                    'produto_id': p.produto_id,
+                    'produto_nome': p.produto_nome,
+                    'receita': float(p.receita),
+                    'custo': float(p.custo),
+                    'margem_pct': float(p.margem_pct),
+                    'pedidos': p.pedidos,
+                }
+                for p in diagnostic.product_breakdown
+            ],
         }
 
 

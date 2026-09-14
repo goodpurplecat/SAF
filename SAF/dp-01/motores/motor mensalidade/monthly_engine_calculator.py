@@ -142,6 +142,54 @@ class MonthlyCalculator:
         }
     
     # ========================
+    # FLUXO DE CAIXA MENSAL
+    # ========================
+    # NOVIDADE (auditoria 14/09/2026): espelha calculate_cashflow() do Motor
+    # de Diagnóstico (financial_engine_calculator.py) — mesma fórmula, mesmos
+    # limiares (config, com os mesmos defaults: 30/60 dias). MonthlyFinancialInput
+    # já coletava avg_collection_period/avg_payment_period (PMR/PMP) desde
+    # sempre; só faltava este método pra usá-los. Ver MonthlyCashFlowAnalysis
+    # em monthly_engine_models.py.
+
+    def calculate_cashflow_for_month(
+        self,
+        input_data: MonthlyFinancialInput,
+        dre: Dict[str, float],
+    ) -> MonthlyCashFlowAnalysis:
+        """
+        Calcula ciclo financeiro e risco de caixa do mês.
+        Ciclo Financeiro = PMR (Prazo Médio de Recebimento) - PMP (Prazo Médio de Pagamento)
+        Positivo = recebe depois que paga = risco de caixa
+        """
+        cf = MonthlyCashFlowAnalysis()
+        cf.avg_collection_period = input_data.avg_collection_period
+        cf.avg_payment_period = input_data.avg_payment_period
+        cf.financial_cycle = cf.avg_collection_period - cf.avg_payment_period
+
+        cycle_critical_threshold = self.config.get('cycle_critical_threshold', 30)
+        cycle_alert_threshold = self.config.get('cycle_alert_threshold', 60)
+
+        if cf.avg_collection_period == 0 or cf.avg_payment_period == 0:
+            cf.cycle_status = "Dados não informados"
+            cf.cycle_traffic_light = "NO_DATA"
+        elif cf.financial_cycle > cycle_critical_threshold:
+            cf.cycle_status = "🔴 Risco de capital de giro"
+            cf.cycle_traffic_light = "CRITICAL"
+        elif cf.financial_cycle > 0:
+            cf.cycle_status = "🟠 Atenção"
+            cf.cycle_traffic_light = "MINIMUM"
+        else:
+            cf.cycle_status = "🟢 Saudável"
+            cf.cycle_traffic_light = "EXCELLENT"
+
+        if dre['profit_net'] > 0 and cf.financial_cycle > cycle_alert_threshold:
+            cf.profit_vs_cash_alert = "⚠️ Lucrativo no papel mas com risco de caixa"
+        else:
+            cf.profit_vs_cash_alert = "✅ Sem conflito identificado"
+
+        return cf
+
+    # ========================
     # COMPARATIVOS
     # ========================
     

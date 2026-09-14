@@ -137,6 +137,52 @@ class MonthlyFinancialInput:
 
 
 @dataclass
+class OrderLine:
+    """
+    Uma linha de pedido NORMALIZADA — o formato comum que qualquer
+    adaptador de canal (Mercado Livre, Shopee, planilha própria etc.) deve
+    produzir antes de chegar ao cálculo de Inteligência de Vendas.
+
+    NOVIDADE (auditoria 14/09/2026, confirmado pelo analista): o plano
+    original (motores.pdf) sempre previu as 8 Perguntas de Negócio sendo
+    calculadas automaticamente via ID de produto/cliente — isso nunca
+    existiu porque nada no sistema coletava dado no nível de pedido. O
+    analista confirmou que o cliente vai subir arquivo (planilha própria
+    ou export baixado de canais como Mercado Livre) — o formulário/upload
+    em si ainda está sendo desenhado. Este dataclass é o contrato: seja
+    qual for o formato bruto de cada canal, um adaptador (ainda não
+    construído — depende do formulário/upload final) precisa convertê-lo
+    pra uma lista de OrderLine antes de chamar
+    sales_intelligence_calculator.calculate_sales_intelligence().
+    """
+    produto_id: str
+    produto_nome: str
+    cliente_id: str
+    canal: str
+    receita: float
+    custo: float = 0.0   # custo/CMV do item, se disponível (0 = assume margem 100% em vez de travar o cálculo)
+    data: Optional[str] = None  # "AAAA-MM-DD", opcional
+
+
+@dataclass
+class ProductAggregate:
+    """
+    Total de um produto (ou canal, quando reaproveitado com produto_id =
+    nome do canal) dentro de um mês — a peça de dado que faltava pra
+    viabilizar o ranking anual (ver annual_engine.py).
+    """
+    produto_id: str
+    produto_nome: str
+    receita: float = 0.0
+    custo: float = 0.0
+    pedidos: int = 0
+
+    @property
+    def margem_pct(self) -> float:
+        return (self.receita - self.custo) / self.receita if self.receita > 0 else 0.0
+
+
+@dataclass
 class SalesIntelligence:
     """As 8 perguntas de inteligência de vendas para um mês"""
     # Top Produtos
@@ -190,6 +236,33 @@ class MonthlyComparative:
 
 
 @dataclass
+class MonthlyCashFlowAnalysis:
+    """
+    Fluxo de caixa do mês — equivalente à aba FLUXO_CAIXA_MENSAL da
+    planilha original.
+
+    NOVIDADE (auditoria 14/09/2026): este dataclass e o cálculo
+    correspondente (MonthlyCalculator.calculate_cashflow_for_month(), em
+    monthly_engine_calculator.py) não existiam — MonthlyFinancialInput já
+    coletava avg_collection_period/avg_payment_period (PMR/PMP) desde
+    sempre, mas nenhum método os lia. A planilha-fonte de Mensalidade tem
+    essa aba com PMR, PMP, Ciclo Financeiro e semáforo, mês a mês, igual
+    ao Motor de Diagnóstico — isso nunca tinha sido portado pro motor
+    mensal em Python. Espelha exatamente CashFlowAnalysis do Motor de
+    Diagnóstico (financial_engine_models.py), com os mesmos limiares
+    (cycle_critical_threshold=30 dias, cycle_alert_threshold=60 dias).
+    """
+    avg_collection_period: float = 0.0      # PMR
+    avg_payment_period: float = 0.0         # PMP
+    financial_cycle: float = 0.0            # Ciclo financeiro (PMR - PMP)
+
+    cycle_status: str = ""
+    cycle_traffic_light: str = "NO_DATA"    # EXCELLENT | MINIMUM | CRITICAL | NO_DATA (espelha TrafficLightStatus do Diagnóstico como string, pra não depender do enum do outro motor)
+
+    profit_vs_cash_alert: str = ""
+
+
+@dataclass
 class MonthlyAlert:
     """Um alerta mensal com status e score"""
     code: str  # F1, V1, S1, etc
@@ -226,7 +299,13 @@ class MonthlySummary:
     # Marketing
     roas: float = 0.0
     cac: float = 0.0
-    
+    ltv: float = 0.0
+    ltv_cac: float = 0.0
+    avg_ticket: float = 0.0
+
+    # Fluxo de Caixa (NOVIDADE 14/09/2026 — ver MonthlyCashFlowAnalysis)
+    cashflow: "MonthlyCashFlowAnalysis" = field(default_factory=lambda: MonthlyCashFlowAnalysis())
+
     # Comparativos financeiros
     # CORREÇÃO (auditoria 05/09/2026): faltava o comparativo de Margem
     # Líquida (%) — só existia o cálculo bruto em `comparatives` (ver
@@ -239,7 +318,20 @@ class MonthlySummary:
     margin_comparative: MonthlyComparative = field(default_factory=MonthlyComparative)          # Margem de Contribuição (%)
     profit_margin_comparative: MonthlyComparative = field(default_factory=MonthlyComparative)   # Margem Líquida (%)
     profit_comparative: MonthlyComparative = field(default_factory=MonthlyComparative)          # Lucro Líquido (R$)
-    
+
+    # NOVIDADE (auditoria 14/09/2026): EVOLUÇÃO FINANCEIRA, conforme o
+    # plano original (motores.pdf), previa acompanhar 9 indicadores mês a
+    # mês — só 4 (acima) tinham comparativo de verdade. Breakeven, Ticket
+    # Médio, ROAS, CAC e LTV:CAC já eram calculados todo mês
+    # (calculate_metrics_for_month), mas nunca viravam série histórica —
+    # apareciam só como o número absoluto do mês, sem "subiu/caiu vs mês
+    # passado". Os 5 campos abaixo fecham essa lacuna.
+    breakeven_comparative: MonthlyComparative = field(default_factory=MonthlyComparative)
+    avg_ticket_comparative: MonthlyComparative = field(default_factory=MonthlyComparative)
+    roas_comparative: MonthlyComparative = field(default_factory=MonthlyComparative)
+    cac_comparative: MonthlyComparative = field(default_factory=MonthlyComparative)
+    ltv_cac_comparative: MonthlyComparative = field(default_factory=MonthlyComparative)
+
     # Inteligência de Vendas
     sales_intel: SalesIntelligence = field(default_factory=SalesIntelligence)
     
@@ -290,7 +382,16 @@ class CompleteMonthlyDiagnostic:
     
     # Alertas
     alerts: List[MonthlyAlert] = field(default_factory=list)
-    
+
+    # NOVIDADE (auditoria 14/09/2026): detalhamento completo por produto do
+    # mês (não só o Top 3 de SalesIntelligence) — guardado aqui pra ficar
+    # disponível em export_to_dict() e, de lá, em Relatorio.dados_motor_json
+    # (database.py). É essa série mês a mês que annual_engine.py consome
+    # pra montar o ranking anual — sem isso, só o Top 3 de cada mês ficaria
+    # salvo, e um produto que fosse #4 todo mês (mas o melhor do ano
+    # somado) nunca apareceria no ranking anual.
+    product_breakdown: List[ProductAggregate] = field(default_factory=list)
+
     # Metadata
     generated_at: datetime = field(default_factory=datetime.now)
     is_valid: bool = False
@@ -309,6 +410,15 @@ class AnnualMonthlyData:
     # Dados brutos (12 meses)
     monthly_inputs: Dict[Month, MonthlyFinancialInput] = field(default_factory=dict)
     monthly_sales_intel: Dict[Month, SalesIntelligence] = field(default_factory=dict)
+
+    # NOVIDADE (auditoria 14/09/2026): esta classe existia desde antes mas
+    # nunca era instanciada nem processada em lugar nenhum do código — era
+    # só um contêiner vazio (ver achado 4 da auditoria "Promessa x
+    # Código"). Este campo é o que faltava pra ela virar útil de verdade:
+    # o detalhamento por produto de cada mês, consumido por
+    # annual_engine.py::build_annual_product_ranking() pra montar o
+    # ranking anual de mais vendidos por ID.
+    monthly_product_breakdown: Dict[Month, List[ProductAggregate]] = field(default_factory=dict)
     
     # Cálculos financeiros (12 meses)
     monthly_summaries: Dict[Month, MonthlySummary] = field(default_factory=dict)

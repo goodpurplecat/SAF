@@ -1,11 +1,13 @@
 """
 Monthly Diagnostic Engine - Diagnostic & Alerts
-Sistema de Alertas Mensal com 15 regras:
+Sistema de Alertas Mensal com 16 regras:
 - F1-F6: Alertas Financeiros Absolutos
 - M4-M5: Alertas de LTV:CAC (adicionado na auditoria de 04/09/2026,
   para paridade com o Motor de Diagnóstico)
 - V1-V3: Alertas de Variação Financeira
 - S1-S4: Alertas de Inteligência de Vendas
+- X1: Alerta de Fluxo de Caixa (NOVIDADE 14/09/2026 — paridade com o X1
+  do Motor de Diagnóstico, agora que calculate_cashflow_for_month() existe)
 """
 
 from monthly_engine_models import *
@@ -34,8 +36,9 @@ class MonthlyDiagnosticEngine:
         sales_intel: SalesIntelligence,
         previous_metrics: Optional[Dict[str, float]] = None,
         recurring_pct_history: Optional[List[float]] = None,
+        cashflow: Optional[MonthlyCashFlowAnalysis] = None,
     ) -> List[MonthlyAlert]:
-        """Gera 13 alertas possíveis para o mês"""
+        """Gera 16 alertas possíveis para o mês"""
         
         alerts = []
         
@@ -302,10 +305,29 @@ class MonthlyDiagnosticEngine:
                 action="Renegociar taxas ou ajustar preço"
             ))
         
+        # ========================
+        # ALERTA DE FLUXO DE CAIXA (X1)
+        # NOVIDADE (auditoria 14/09/2026) — espelha X1 do Motor de
+        # Diagnóstico, agora que calculate_cashflow_for_month() existe.
+        # ========================
+
+        if (cashflow is not None
+                and cashflow.avg_collection_period > 0
+                and cashflow.avg_payment_period > 0
+                and cashflow.financial_cycle > self.config.get('cycle_critical_threshold', 30)):
+            alerts.append(MonthlyAlert(
+                code="X1",
+                rule="Ciclo Financeiro CRÍTICO (> 30 dias)",
+                is_active=True,
+                impact=3,
+                urgency=3,
+                action="Rever prazo de recebimento"
+            ))
+
         # Calcular scores
         for alert in alerts:
             alert.score = alert.impact * alert.urgency
-        
+
         return alerts
     
     def get_top_3_priorities(self, alerts: List[MonthlyAlert]) -> List[MonthlyAlert]:
@@ -327,9 +349,10 @@ class MonthlyInsightGenerator:
         metrics: Dict[str, float],
         comparative: Dict[str, MonthlyComparative],
         sales_intel: SalesIntelligence,
-        summary: MonthlySummary
+        summary: MonthlySummary,
+        cashflow: Optional[MonthlyCashFlowAnalysis] = None,
     ) -> Dict[str, str]:
-        """Gera 10 blocos de insights"""
+        """Gera 11 blocos de insights (10 originais + FLUXO_CAIXA, novidade 14/09/2026)"""
         
         insights = {}
         
@@ -437,5 +460,24 @@ class MonthlyInsightGenerator:
             f"Mês de {month_name} foi um {summary.overall_status.lower()} "
             "— continue monitorando os indicadores nos próximos meses."
         )
-        
+
+        # 11. FLUXO DE CAIXA (NOVIDADE 14/09/2026 — espelha o bloco 10 do
+        # Motor de Diagnóstico, ver _fluxo_caixa() em
+        # financial_engine_diagnostic.py; antes não existia porque o motor
+        # mensal não calculava fluxo de caixa nenhum)
+        if cashflow is None or cashflow.avg_collection_period == 0 or cashflow.avg_payment_period == 0:
+            insights['FLUXO_CAIXA'] = "Dados de fluxo de caixa não informados."
+        else:
+            texto = f"Ciclo financeiro de {cashflow.financial_cycle:.0f} dias. "
+            if cashflow.financial_cycle > self.config.get('cycle_alert_threshold', 60):
+                texto += (
+                    "Risco de caixa: o negócio paga antes de receber. "
+                    "Lucro no papel não significa dinheiro disponível."
+                )
+            elif cashflow.financial_cycle > 0:
+                texto += "Atenção: prazo de recebimento maior que o de pagamento."
+            else:
+                texto += "Ciclo financeiro saudável."
+            insights['FLUXO_CAIXA'] = texto
+
         return insights
