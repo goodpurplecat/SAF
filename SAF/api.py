@@ -365,6 +365,7 @@ def _montar_historico_mensalidade(db: Session, cliente_id: str):
 
 
 def _processar_em_segundo_plano(
+    relatorio_id: str,
     cliente_id: str,
     email: str,
     tipo_produto: str,
@@ -379,16 +380,24 @@ def _processar_em_segundo_plano(
     renderização real + narração + montagem de vídeo), então a requisição
     HTTP não pode ficar esperando isso terminar.
 
+    relatorio_id: CORREÇÃO (auditoria 15/09/2026, ajuste pro frontend do
+    `site`) — antes, o Relatorio só era criado no BANCO aqui dentro, no
+    FIM do processamento (sucesso, revisão manual ou erro). Entre o
+    cliente clicar "enviar" e o pipeline terminar (pode levar minutos —
+    são várias chamadas de IA + montagem de PDF/vídeo), não existia NENHUMA
+    linha no banco pra aquele mês: `minha-area.html`, buscando por "existe
+    Relatorio deste mês?", continuaria mostrando "faltam os dados" mesmo
+    logo depois do cliente ter enviado — parecendo que o envio não
+    funcionou. Agora o Relatorio é criado (status="processando") na
+    requisição síncrona, ANTES da BackgroundTask (ver /processar), e esta
+    função só busca essa mesma linha e atualiza — nunca cria uma segunda.
+
     conteudo_arquivos_vendas / canal_arquivos_vendas: NOVIDADE (auditoria
     15/09/2026, Pendência 1) — repassados direto pra
     PipelineSAF.processar_cliente() (ver docstring lá). São os arquivos da
     área "Vendas do mês" de formulario-vendas-mensal.html (pedido por
     pedido), DIFERENTES de `conteudo_arquivos` (área "Financeiro do mês",
-    dados agregados — mesmo formato que o Diagnóstico já usa). NOTA PRA
-    QUEM AJUSTAR O FRONTEND (repo `site`, fora do escopo desta correção):
-    este backend espera as DUAS áreas de upload como dicionários
-    separados no corpo de POST /processar — confirmar esse contrato com
-    quem monta o envio em formulario-vendas-mensal.html.
+    dados agregados — mesmo formato que o Diagnóstico já usa).
     """
     db = next(get_db())
     try:
@@ -420,16 +429,14 @@ def _processar_em_segundo_plano(
             recurring_pct_history=recurring_pct_history or None,
         )
 
-        # CORREÇÃO (auditoria 12/09/2026): `relatorio.id` era lido AQUI, antes
-        # de db.add()/db.commit() — o default (SQLAlchemy Column(default=...))
-        # só é aplicado no flush/commit, então `relatorio.id` valia `None`
-        # neste ponto, sempre. Toda chave R2 saía como "relatorios/None/...",
-        # e cada novo relatório (de QUALQUER cliente) sobrescrevia o PDF/vídeo
-        # do relatório anterior no mesmo caminho fixo — risco real de um
-        # cliente ver o relatório de outro. Gerando o id explicitamente antes
-        # de montar as chaves, cada relatório fica isolado de verdade.
-        relatorio_id = str(uuid.uuid4())
-        relatorio = Relatorio(id=relatorio_id, cliente_id=cliente_id, tipo_produto=tipo_produto)
+        # Busca a linha criada em /processar (nunca cria uma nova aqui —
+        # ver nota de relatorio_id acima). Se por algum motivo ela não
+        # existir mais (nunca deveria acontecer — nada além desta função
+        # apaga Relatorio), recria como rede de segurança, pra nunca
+        # perder o resultado do processamento.
+        relatorio = db.query(Relatorio).filter_by(id=relatorio_id).first()
+        if relatorio is None:
+            relatorio = Relatorio(id=relatorio_id, cliente_id=cliente_id, tipo_produto=tipo_produto)
 
         # CORREÇÃO (auditoria 15/09/2026, Pendência 3): mes_referencia nunca
         # era preenchido (coluna existia, ninguém escrevia nela) — sem isso,
@@ -490,11 +497,29 @@ def processar(
     # frontend (repo `site`).
     conteudo_arquivos_vendas: Optional[Dict[str, Any]] = None,
     canal_arquivos_vendas: Optional[Dict[str, Any]] = None,
+    db: Session = Depends(get_db),
 ):
+    # CORREÇÃO (auditoria 15/09/2026): o Relatorio agora é criado AQUI,
+    # síncrono, com status="processando", ANTES da BackgroundTask — não
+    # mais só no final do processamento. Ver nota completa em
+    # _processar_em_segundo_plano (parâmetro relatorio_id). Isso também é
+    # o que permite `minha-area.html` mostrar "processando" em vez de
+    # "faltam os dados" assim que o cliente envia.
+    relatorio_id = str(uuid.uuid4())
+    relatorio = Relatorio(
+        id=relatorio_id, cliente_id=cliente.id, tipo_produto=tipo_produto, status="processando"
+    )
+    db.add(relatorio)
+    db.commit()
+
     background_tasks.add_task(
         _processar_em_segundo_plano,
-        cliente.id, cliente.email, tipo_produto,
+        relatorio_id, cliente.id, cliente.email, tipo_produto,
         respostas_formulario, arquivos_info, conteudo_arquivos,
         conteudo_arquivos_vendas, canal_arquivos_vendas,
     )
-    return {"status": "processando", "mensagem": "Você recebe um email assim que estiver pronto."}
+    return {
+        "status": "processando",
+        "mensagem": "Você recebe um email assim que estiver pronto.",
+        "relatorio_id": relatorio_id,
+    }
