@@ -216,7 +216,11 @@ def teste_motor_mensalidade_a_partir_da_limpeza():
     print("\n[4/7] Motor de Mensalidade a partir de dados_limpos (formato real da Limpeza)...")
     pipeline = PipelineSAF()
     avisos = []
-    dados_motor, categoria = pipeline._rodar_motor_mensalidade(_dados_limpos_mensalidade_fake(), None, avisos)
+    dados_motor, categoria, clientes_ids_mes = pipeline._rodar_motor_mensalidade(
+        _dados_limpos_mensalidade_fake(), None, avisos
+    )
+    assert clientes_ids_mes == [], "Sem conteudo_arquivos_vendas, não deveria haver cliente_id nenhum"
+    assert dados_motor["year"] == 2026, "Abril' sem ano no texto deveria cair no ano corrente (2026 neste ambiente)"
 
     assert dados_motor["client_name"] == "Loja Teste Mensalidade"
     assert dados_motor["month"] == "Abril"
@@ -231,18 +235,75 @@ def teste_motor_mensalidade_a_partir_da_limpeza():
 
     print("      Mês por extenso com variações reconhecido (Março, fevereiro, Dezembro/2026)...")
     for mes_texto, mes_esperado in [("Março", "Março"), ("fevereiro", "Fevereiro"), ("Dezembro/2026", "Dezembro")]:
-        dm, _ = pipeline._rodar_motor_mensalidade(_dados_limpos_mensalidade_fake(mes=mes_texto), None, [])
+        dm, _, _ = pipeline._rodar_motor_mensalidade(_dados_limpos_mensalidade_fake(mes=mes_texto), None, [])
         assert dm["month"] == mes_esperado, f"{mes_texto} -> esperava {mes_esperado}, veio {dm['month']}"
-    print("      ✅ Todas as variações de texto de mês resolvidas pro Month certo.")
+    dm_com_ano, _, _ = pipeline._rodar_motor_mensalidade(_dados_limpos_mensalidade_fake(mes="Dezembro/2026"), None, [])
+    assert dm_com_ano["year"] == 2026, "Ano no texto do período deveria ser usado em vez do ano corrente"
+    print("      ✅ Todas as variações de texto de mês resolvidas pro Month certo; ano extraído do texto quando presente.")
 
     print("      Com período anterior: comparativos oficiais do motor vêm preenchidos...")
-    dados_motor_anterior, _ = pipeline._rodar_motor_mensalidade(_dados_limpos_mensalidade_fake(), None, [])
-    dados_motor_atual, _ = pipeline._rodar_motor_mensalidade(
+    dados_motor_anterior, _, _ = pipeline._rodar_motor_mensalidade(_dados_limpos_mensalidade_fake(), None, [])
+    dados_motor_atual, _, _ = pipeline._rodar_motor_mensalidade(
         _dados_limpos_mensalidade_fake(), dados_motor_anterior, []
     )
     comp = dados_motor_atual["comparatives"]["revenue"]
     assert comp["previous"] == dados_motor_anterior["financial"]["revenue_net"], comp
     print(f"      ✅ previous_month_metrics repassado corretamente pro motor (comparativo de receita: {comp}).")
+
+
+def teste_motor_mensalidade_com_vendas_por_pedido():
+    """
+    PENDÊNCIA 1 (handoff 15/09/2026): conteudo_arquivos_vendas plugado de
+    verdade em IAExtratoraVendas + calculate_sales_intelligence(), em vez
+    de sales_intel chegar sempre vazio em run_monthly_diagnostic(). Não
+    chama a API do Gemini de verdade (substituímos extrair_pedidos() por
+    um double determinístico) — o que este teste cobre é a FIAÇÃO
+    (dados de pedido -> SalesIntelligence real -> motor -> export), não a
+    qualidade da extração por IA em si (isso é a Pendência 2, que precisa
+    de GEMINI_API_KEY de verdade contra um arquivo real).
+    """
+    print("\n[4b/7] Motor de Mensalidade com pedidos reais (IAExtratoraVendas + sales_intelligence_calculator)...")
+    from monthly_engine_models import OrderLine
+    import app as app_module
+
+    pedidos_abril = [
+        OrderLine(produto_id="P1", produto_nome="Produto A", cliente_id="C1", canal="Mercado Livre", receita=20000, custo=8000),
+        OrderLine(produto_id="P2", produto_nome="Produto B", cliente_id="C2", canal="Shopify", receita=15000, custo=9000),
+        OrderLine(produto_id="P1", produto_nome="Produto A", cliente_id="C3", canal="Mercado Livre", receita=25000, custo=10000),
+    ]
+
+    class _ExtratoraVendasFalsa:
+        """Double: nunca chama genai.Client() (sem GEMINI_API_KEY nesta suíte)."""
+        def __init__(self):
+            pass
+
+        def extrair_pedidos(self, conteudo_arquivo, nome_arquivo, canal_default=None):
+            return pedidos_abril if nome_arquivo == "vendas_abril.csv" else []
+
+    original = app_module.IAExtratoraVendas
+    app_module.IAExtratoraVendas = _ExtratoraVendasFalsa
+    try:
+        pipeline = PipelineSAF()
+        dados_motor, categoria, clientes_ids_mes = pipeline._rodar_motor_mensalidade(
+            _dados_limpos_mensalidade_fake(),
+            None,
+            [],
+            conteudo_arquivos_vendas={"vendas_abril.csv": "produto,cliente,canal,valor\n..."},
+            previous_month_product_ids={"P4"},  # "parado" — vendia antes, não vende mais
+            known_customer_ids={"C1"},  # C1 é recorrente; C2/C3 são novos
+        )
+        assert sorted(clientes_ids_mes) == ["C1", "C2", "C3"], clientes_ids_mes
+        si = dados_motor["sales_intelligence"]
+        assert si["top_product_1"] == "Produto A", si  # P1 = 45000 > P2 = 15000
+        assert si["paused_products_count"] == 1, si  # "P4" não vendeu este mês
+        assert abs(si["recurring_customers_pct"] - (1 / 3)) < 1e-9, si  # 1 recorrente (C1) de 3 clientes
+        assert len(dados_motor["product_breakdown"]) == 2, dados_motor["product_breakdown"]  # P1 e P2
+        print(f"      ✅ Pedidos reais viram SalesIntelligence real (top produto: {si['top_product_1']}, "
+              f"{si['paused_products_count']} parado(s), {si['recurring_customers_pct']:.1%} recorrência) "
+              f"e product_breakdown ({len(dados_motor['product_breakdown'])} produto(s)) chega ao export — "
+              f"pronto pra persistir e alimentar annual_engine.py.")
+    finally:
+        app_module.IAExtratoraVendas = original
 
 
 def teste_construir_dados_graficos():
@@ -377,6 +438,7 @@ if __name__ == "__main__":
     teste_mes_para_enum()
     teste_motor_diagnostico_a_partir_da_limpeza()
     teste_motor_mensalidade_a_partir_da_limpeza()
+    teste_motor_mensalidade_com_vendas_por_pedido()
     teste_construir_dados_graficos()
     teste_taxas_canais_configuraveis()
     teste_pipeline_completo_ponta_a_ponta()
