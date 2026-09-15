@@ -50,6 +50,16 @@ class Relatorio(Base):
     pdf_chave_r2 = Column(String, nullable=True)
     video_chave_r2 = Column(String, nullable=True)
     dados_motor_json = Column(Text, nullable=True)
+    # NOVIDADE (auditoria 15/09/2026, handoff Pendência 3): lista JSON de
+    # cliente_id (ResultadoPipeline.clientes_ids_mes, app.py) vistos nos
+    # pedidos deste mês — só preenchido em Mensalidade, quando o cliente
+    # subiu arquivo de vendas por pedido. dados_motor_json (acima) só guarda
+    # o AGREGADO por produto (product_breakdown) — nenhum ID de cliente
+    # individual aparece lá — então sem esta coluna não haveria como
+    # reconstruir known_customer_ids (novo x recorrente) nos meses
+    # seguintes. None em qualquer relatório anterior a esta migração, ou em
+    # meses processados sem upload de vendas por pedido.
+    clientes_ids_json = Column(Text, nullable=True)
     mensagem_erro = Column(Text, nullable=True)
     criado_em = Column(DateTime, default=datetime.utcnow)
 

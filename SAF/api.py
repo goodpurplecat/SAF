@@ -293,6 +293,77 @@ def listar_relatorios(cliente: Cliente = Depends(cliente_atual), db: Session = D
 # Processamento — chamado depois que o cliente envia o formulário
 # ------------------------------------------------------------------
 
+# PENDÊNCIA 3 (handoff 15/09/2026): quantos relatórios de Mensalidade
+# anteriores (já "pronto") olhar pra trás ao montar o histórico deste
+# cliente. 12 = 1 ano corrido, o mesmo horizonte que annual_engine.py já
+# foi desenhado pra aceitar (build_annual_product_ranking aceita de 1 a 12
+# meses). Só afeta known_customer_ids/recurring_pct_history/ranking anual —
+# previous_month_product_ids (produto parado) sempre olha só o relatório
+# IMEDIATAMENTE anterior (ver comentário abaixo), igual o checklist descreve
+# ("vendiam no mês anterior, zeraram este mês").
+HISTORICO_MESES_MENSALIDADE = 12
+
+
+def _montar_historico_mensalidade(db: Session, cliente_id: str):
+    """
+    PENDÊNCIA 3 (handoff 15/09/2026): antes desta correção, ninguém lia o
+    histórico de meses anteriores pra montar `previous_month_product_ids`
+    (produto parado) nem `known_customer_ids` (recorrência) — os dois
+    parâmetros que run_monthly_diagnostic()/calculate_sales_intelligence()
+    já aceitavam há tempo, mas sempre chegavam vazios/None. Só
+    `dados_motor_periodo_anterior` (pro comparativo financeiro) já era
+    buscado (olhando só o último relatório).
+
+    Retorna (dados_motor_anterior, previous_month_product_ids,
+    known_customer_ids, recurring_pct_history) — todos vazios/None se o
+    cliente ainda não tem nenhum relatório de Mensalidade "pronto" (1º mês
+    dele, comportamento conservador de sempre).
+    """
+    historicos = (
+        db.query(Relatorio)
+        .filter_by(cliente_id=cliente_id, tipo_produto="Mensalidade", status="pronto")
+        .order_by(Relatorio.criado_em.desc())
+        .limit(HISTORICO_MESES_MENSALIDADE)
+        .all()
+    )
+
+    dados_motor_anterior = None
+    previous_month_product_ids: set = set()
+    known_customer_ids: set = set()
+    recurring_pct_history: List[float] = []
+
+    if not historicos:
+        return dados_motor_anterior, previous_month_product_ids, known_customer_ids, recurring_pct_history
+
+    mais_recente = historicos[0]
+    if mais_recente.dados_motor_json:
+        dados_motor_anterior = json.loads(mais_recente.dados_motor_json)
+        # "Produto parado" = vendia no mês ANTERIOR (só ele, não os últimos
+        # 12), zerou este mês — ver checklist_motores.md. product_breakdown
+        # é o detalhamento completo (não só o Top 3), preenchido a partir
+        # da auditoria 14/09/2026 (ver monthly_engine.py::export_to_dict()).
+        previous_month_product_ids = {
+            item["produto_id"] for item in dados_motor_anterior.get("product_breakdown", [])
+        }
+
+    for h in historicos:
+        if h.clientes_ids_json:
+            known_customer_ids.update(json.loads(h.clientes_ids_json))
+
+    # Mais antigo -> mais recente: recurring_pct_history é consumido pelo
+    # alerta S1 (monthly_engine_diagnostic.py) pra distinguir frequência
+    # baixa sustentada de uma queda pontual de 1 mês só.
+    for h in reversed(historicos):
+        if not h.dados_motor_json:
+            continue
+        dados_h = json.loads(h.dados_motor_json)
+        pct = dados_h.get("sales_intelligence", {}).get("recurring_customers_pct")
+        if pct is not None:
+            recurring_pct_history.append(pct)
+
+    return dados_motor_anterior, previous_month_product_ids, known_customer_ids, recurring_pct_history
+
+
 def _processar_em_segundo_plano(
     cliente_id: str,
     email: str,
@@ -300,24 +371,38 @@ def _processar_em_segundo_plano(
     respostas_formulario: dict,
     arquivos_info: list,
     conteudo_arquivos: dict,
+    conteudo_arquivos_vendas: Optional[dict] = None,
+    canal_arquivos_vendas: Optional[dict] = None,
 ):
     """
     Roda numa BackgroundTask — a geração de PDF/vídeo demora (é
     renderização real + narração + montagem de vídeo), então a requisição
     HTTP não pode ficar esperando isso terminar.
+
+    conteudo_arquivos_vendas / canal_arquivos_vendas: NOVIDADE (auditoria
+    15/09/2026, Pendência 1) — repassados direto pra
+    PipelineSAF.processar_cliente() (ver docstring lá). São os arquivos da
+    área "Vendas do mês" de formulario-vendas-mensal.html (pedido por
+    pedido), DIFERENTES de `conteudo_arquivos` (área "Financeiro do mês",
+    dados agregados — mesmo formato que o Diagnóstico já usa). NOTA PRA
+    QUEM AJUSTAR O FRONTEND (repo `site`, fora do escopo desta correção):
+    este backend espera as DUAS áreas de upload como dicionários
+    separados no corpo de POST /processar — confirmar esse contrato com
+    quem monta o envio em formulario-vendas-mensal.html.
     """
     db = next(get_db())
     try:
         dados_motor_anterior = None
+        previous_month_product_ids: set = set()
+        known_customer_ids: set = set()
+        recurring_pct_history: List[float] = []
         if tipo_produto == "Mensalidade":
-            ultimo = (
-                db.query(Relatorio)
-                .filter_by(cliente_id=cliente_id, status="pronto")
-                .order_by(Relatorio.criado_em.desc())
-                .first()
-            )
-            if ultimo and ultimo.dados_motor_json:
-                dados_motor_anterior = json.loads(ultimo.dados_motor_json)
+            (
+                dados_motor_anterior,
+                previous_month_product_ids,
+                known_customer_ids,
+                recurring_pct_history,
+            ) = _montar_historico_mensalidade(db, cliente_id)
 
         out_dir = f"/tmp/saidas/{cliente_id}_{datetime.now().timestamp()}"
 
@@ -328,6 +413,11 @@ def _processar_em_segundo_plano(
             conteudo_arquivos=conteudo_arquivos,
             out_dir=out_dir,
             dados_motor_periodo_anterior=dados_motor_anterior,
+            conteudo_arquivos_vendas=conteudo_arquivos_vendas,
+            canal_arquivos_vendas=canal_arquivos_vendas,
+            previous_month_product_ids=previous_month_product_ids or None,
+            known_customer_ids=known_customer_ids or None,
+            recurring_pct_history=recurring_pct_history or None,
         )
 
         # CORREÇÃO (auditoria 12/09/2026): `relatorio.id` era lido AQUI, antes
@@ -340,6 +430,18 @@ def _processar_em_segundo_plano(
         # de montar as chaves, cada relatório fica isolado de verdade.
         relatorio_id = str(uuid.uuid4())
         relatorio = Relatorio(id=relatorio_id, cliente_id=cliente_id, tipo_produto=tipo_produto)
+
+        # CORREÇÃO (auditoria 15/09/2026, Pendência 3): mes_referencia nunca
+        # era preenchido (coluna existia, ninguém escrevia nela) — sem isso,
+        # a única forma de ordenar/identificar "o mês anterior" era
+        # criado_em (quando o relatório foi GERADO, não o mês que ele
+        # DESCREVE — os dois podem divergir se um mês for reprocessado
+        # depois). Só pra Mensalidade, a partir do que o motor já derivou
+        # (dados_motor['month']/['year'], ver monthly_engine.py).
+        if tipo_produto == "Mensalidade" and resultado.dados_motor:
+            relatorio.mes_referencia = f"{resultado.dados_motor.get('month')}/{resultado.dados_motor.get('year')}"
+        if resultado.clientes_ids_mes:
+            relatorio.clientes_ids_json = json.dumps(resultado.clientes_ids_mes)
 
         if resultado.status == "SUCESSO":
             chave_pdf = f"relatorios/{relatorio_id}/relatorio.pdf"
@@ -382,10 +484,17 @@ def processar(
     arquivos_info: List[Any],
     cliente: Cliente = Depends(cliente_atual),
     conteudo_arquivos: Optional[Dict[str, Any]] = None,
+    # NOVIDADE (auditoria 15/09/2026, Pendência 1): arquivos da área
+    # "Vendas do mês" (pedido por pedido) — só Mensalidade. Ver docstring
+    # de _processar_em_segundo_plano acima pra nota sobre o contrato com o
+    # frontend (repo `site`).
+    conteudo_arquivos_vendas: Optional[Dict[str, Any]] = None,
+    canal_arquivos_vendas: Optional[Dict[str, Any]] = None,
 ):
     background_tasks.add_task(
         _processar_em_segundo_plano,
         cliente.id, cliente.email, tipo_produto,
         respostas_formulario, arquivos_info, conteudo_arquivos,
+        conteudo_arquivos_vendas, canal_arquivos_vendas,
     )
     return {"status": "processando", "mensagem": "Você recebe um email assim que estiver pronto."}

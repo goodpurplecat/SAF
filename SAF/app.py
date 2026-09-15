@@ -53,12 +53,13 @@ Ver comentários "CORREÇÃO (05/09/2026, auditoria app.py)" em limpeza.py:
 """
 
 import os
+import re
 import sys
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -104,8 +105,28 @@ from financial_engine_models import (  # motor diagnóstico
 )
 from financial_engine import FinancialDiagnosticEngine
 
-from monthly_engine_models import Month, MonthlyFinancialInput, SalesIntelligence  # motor mensalidade
+from monthly_engine_models import (  # motor mensalidade
+    Month,
+    MonthlyFinancialInput,
+    OrderLine,
+    ProductAggregate,
+    SalesIntelligence,
+)
 from monthly_engine import MonthlyDiagnosticEngineMain
+from sales_intelligence_calculator import calculate_sales_intelligence
+
+# PENDÊNCIA 1 (handoff 15/09/2026): IAExtratoraVendas (pedido por pedido,
+# dp-01/tratamento/extratora_vendas.py) e calculate_sales_intelligence()
+# (acima) já existiam prontos e testados, mas nenhum dos dois era chamado
+# de lugar nenhum do pipeline — DepartamentoTratamento (dp-01) só conhece
+# IAExtratora (dados agregados, mesmo formato do Diagnóstico), então
+# `sales_intel` sempre chegava em run_monthly_diagnostic() como um
+# SalesIntelligence() vazio, não importa o que o cliente tivesse
+# realmente vendido. Import direto do pacote `tratamento` (não repassado
+# por DepartamentoTratamento.processar_cliente(), que segue servindo só o
+# fluxo agregado/financeiro) porque a extração de vendas por pedido é
+# deliberadamente um fluxo à parte — ver docstring de extratora_vendas.py.
+from tratamento.extratora_vendas import ErroExtracaoVendas, IAExtratoraVendas
 
 from producao import DepartamentoProducao, ResultadoProducao  # dp-02
 from producao.models import TipoProduto as _TipoProdutoProducao
@@ -134,6 +155,13 @@ class ResultadoPipeline:
     resultado_producao: Optional[ResultadoProducao] = None
     resultado_edicao: Optional[ResultadoEdicao] = None
     avisos: List[str] = field(default_factory=list)
+    # PENDÊNCIA 3 (handoff 15/09/2026): todo cliente_id visto nos pedidos
+    # deste mês (só preenchido pra Mensalidade, quando conteudo_arquivos_vendas
+    # foi passado) — quem chama processar_cliente() persiste isto (ver
+    # database.py::Relatorio) pra virar known_customer_ids do MÊS SEGUINTE
+    # (novo x recorrente). Sem isso persistido em algum lugar, a
+    # recorrência nunca teria como ser calculada de verdade mês a mês.
+    clientes_ids_mes: List[str] = field(default_factory=list)
 
     def como_json(self) -> Dict[str, Any]:
         return {
@@ -187,6 +215,11 @@ class PipelineSAF:
         dados_motor_periodo_anterior: Optional[Dict[str, Any]] = None,
         periodo_anterior_recorte: Optional[Dict[str, Any]] = None,
         taxas_canais_customizadas: Optional[Dict[str, float]] = None,
+        conteudo_arquivos_vendas: Optional[Dict[str, str]] = None,
+        canal_arquivos_vendas: Optional[Dict[str, str]] = None,
+        previous_month_product_ids: Optional[Set[str]] = None,
+        known_customer_ids: Optional[Set[str]] = None,
+        recurring_pct_history: Optional[List[float]] = None,
     ) -> ResultadoPipeline:
         """
         tipo_produto: "Diagnóstico" ou "Mensalidade".
@@ -242,6 +275,45 @@ class PipelineSAF:
             veio do formulário — só o(s) canal(is) aqui é(são)
             sobrescrito(s), os outros continuam normalmente (ver correção
             em financial_engine_calculator.py::validate_input).
+        conteudo_arquivos_vendas: SÓ MENSALIDADE (handoff 15/09/2026,
+            Pendência 1) — {'nome do arquivo de vendas': 'conteúdo já em
+            texto'}, os arquivos que o cliente sobe na área "Vendas do
+            mês" (pedido por pedido — export de canal ou planilha
+            própria), DIFERENTES dos arquivos financeiros agregados que
+            vão em `conteudo_arquivos`/`arquivos_info`. Quando fornecido,
+            cada arquivo passa por IAExtratoraVendas.extrair_pedidos()
+            (dp-01/tratamento/extratora_vendas.py) e o resultado
+            (OrderLine) alimenta calculate_sales_intelligence()
+            (sales_intelligence_calculator.py) — as 8 Perguntas de
+            Negócio deixam de ser um SalesIntelligence() vazio. Sem isto
+            (fluxo antigo), o comportamento não muda: sales_intel continua
+            vazio, como sempre foi.
+        canal_arquivos_vendas: {'nome do arquivo': 'nome do canal'} —
+            repassado como `canal_default` pra cada arquivo de
+            `conteudo_arquivos_vendas` (ver extrair_pedidos()), útil
+            quando um export inteiro é de um único canal que não repete
+            essa informação em cada linha (ex.: export nativo do Mercado
+            Livre). Opcional; arquivo ausente aqui usa canal_default=None
+            (linha sem canal próprio vira "Não informado").
+        previous_month_product_ids: IDs de produto (ver ProductAggregate)
+            que venderam no(s) mês(es) anterior(es) deste cliente — repassado
+            direto pra calculate_sales_intelligence() pra achar "produtos
+            parados". Quem chama normalmente lê isso do
+            `product_breakdown` do último Relatorio de Mensalidade
+            persistido (ver database.py) — sem isso, paused_products_count
+            sai sempre 0 (conservador, nunca inventa "parou" sem saber
+            quem vendia antes).
+        known_customer_ids: todo cliente_id já visto em meses anteriores
+            deste cliente — repassado direto pra
+            calculate_sales_intelligence() pra separar cliente novo x
+            recorrente. Quem chama normalmente é a UNIÃO de
+            `ResultadoPipeline.clientes_ids_mes` de todos os relatórios de
+            Mensalidade anteriores já persistidos. Sem isso, todo cliente
+            do mês conta como novo.
+        recurring_pct_history: recurring_pct (fração) dos meses anteriores
+            deste cliente, do mais antigo pro mais recente — repassado
+            direto pra run_monthly_diagnostic() (alerta S1, ver
+            monthly_engine_diagnostic.py). Opcional.
         """
         timestamp = datetime.now().isoformat()
 
@@ -306,16 +378,28 @@ class PipelineSAF:
         # ================================================================
         # ETAPA 2 — MOTOR (Diagnóstico OU Mensalidade)
         # ================================================================
+        clientes_ids_mes: List[str] = []
         try:
             if tipo_produto == "Diagnóstico":
                 dados_motor, categoria = self._rodar_motor_diagnostico(
                     dados_limpos, avisos, taxas_canais_customizadas
                 )
             else:
-                dados_motor, categoria = self._rodar_motor_mensalidade(
-                    dados_limpos, dados_motor_periodo_anterior, avisos
+                dados_motor, categoria, clientes_ids_mes = self._rodar_motor_mensalidade(
+                    dados_limpos,
+                    dados_motor_periodo_anterior,
+                    avisos,
+                    conteudo_arquivos_vendas=conteudo_arquivos_vendas,
+                    canal_arquivos_vendas=canal_arquivos_vendas,
+                    previous_month_product_ids=previous_month_product_ids,
+                    known_customer_ids=known_customer_ids,
+                    recurring_pct_history=recurring_pct_history,
                 )
         except Exception as e:
+            # ErroExtracaoVendas (Pendência 1) cai aqui também — mesmo
+            # padrão de "nunca falhar em silêncio" do resto do pipeline:
+            # um bloco de vendas que não pôde ser extraído para a etapa
+            # MOTOR inteira, em vez de seguir com dado incompleto.
             return ResultadoPipeline(
                 status="ERRO", etapa="MOTOR", tipo_produto=tipo_produto, cliente_nome=nome_loja,
                 timestamp=timestamp, mensagem=f"{type(e).__name__}: {e}",
@@ -355,6 +439,7 @@ class PipelineSAF:
                 status="ERRO", etapa="PRODUCAO", tipo_produto=tipo_produto, cliente_nome=nome_loja,
                 timestamp=timestamp, mensagem=f"{type(e).__name__}: {e}",
                 resultado_tratamento=resultado_tratamento, dados_motor=dados_motor, avisos=avisos,
+                clientes_ids_mes=clientes_ids_mes,
             )
 
         if resultado_producao.status.value != "SUCESSO":
@@ -369,6 +454,7 @@ class PipelineSAF:
                 dados_motor=dados_motor,
                 resultado_producao=resultado_producao,
                 avisos=avisos,
+                clientes_ids_mes=clientes_ids_mes,
             )
 
         # ================================================================
@@ -425,6 +511,7 @@ class PipelineSAF:
             resultado_producao=resultado_producao,
             resultado_edicao=resultado_edicao,
             avisos=avisos,
+            clientes_ids_mes=clientes_ids_mes,
         )
 
     # ------------------------------------------------------------------
@@ -509,11 +596,30 @@ class PipelineSAF:
         dados_limpos: Dict[str, Any],
         dados_motor_periodo_anterior: Optional[Dict[str, Any]],
         avisos: List[str],
-    ) -> Tuple[Dict[str, Any], str]:
+        conteudo_arquivos_vendas: Optional[Dict[str, str]] = None,
+        canal_arquivos_vendas: Optional[Dict[str, str]] = None,
+        previous_month_product_ids: Optional[Set[str]] = None,
+        known_customer_ids: Optional[Set[str]] = None,
+        recurring_pct_history: Optional[List[float]] = None,
+    ) -> Tuple[Dict[str, Any], str, List[str]]:
         config = dict(dados_limpos["config"])  # Dict[str, Any] tolerante — motor usa .get()
         monthly_input_raw = dados_limpos["monthly_input"]
 
         mes_enum = _mes_para_enum(monthly_input_raw["month"])
+
+        # CORREÇÃO (auditoria 15/09/2026, handoff Pendência 3): 'year'
+        # nunca era preenchido em lugar nenhum — um comentário antigo em
+        # limpeza.py ("campo morto, não é lido em lugar nenhum do motor
+        # mensal") ficou desatualizado assim que monthly_engine.py passou
+        # a exportar 'year' em export_to_dict() (config.get('year', 2026)).
+        # Sem isso, TODO relatório de Mensalidade, de qualquer cliente, em
+        # qualquer ano, saía com year=2026 fixo — o que quebraria
+        # silenciosamente qualquer busca de histórico entre anos
+        # diferentes (ex.: comparar Janeiro/2027 com Dezembro/2026).
+        # Deriva do próprio texto do período quando ele trouxer um ano
+        # (ex.: "Abril/2026"); sem isso, cai no ano corrente.
+        config.setdefault("year", _ano_do_periodo(monthly_input_raw["month"]))
+
         monthly_data = dict(monthly_input_raw["data"])
         monthly_data.setdefault("channel_revenues", {})
         monthly_data.setdefault("channel_fees", {})
@@ -528,12 +634,62 @@ class PipelineSAF:
                     "comparativo mês a mês ignorado."
                 )
 
+        # ================================================================
+        # PENDÊNCIA 1 (handoff 15/09/2026): IA Extratora de Vendas + Sales
+        # Intelligence — antes desta correção, `sales_intel` chegava aqui
+        # SEMPRE como um SalesIntelligence() vazio (nenhum código no
+        # pipeline calculava as 8 Perguntas de Negócio a partir de dado
+        # real). conteudo_arquivos_vendas é opcional de propósito: sem ele
+        # (fluxo antigo/testes), o comportamento não muda em nada.
+        # ================================================================
+        sales_intel = SalesIntelligence()
+        product_breakdown: List[ProductAggregate] = []
+        clientes_ids_mes: List[str] = []
+
+        if conteudo_arquivos_vendas:
+            extratora_vendas = IAExtratoraVendas()
+            canal_arquivos_vendas = canal_arquivos_vendas or {}
+            order_lines: List[OrderLine] = []
+            for nome_arquivo, conteudo in conteudo_arquivos_vendas.items():
+                # ErroExtracaoVendas sobe direto pra quem chamou
+                # processar_cliente() (etapa MOTOR) — nunca seguimos com
+                # inteligência de vendas incompleta/inventada.
+                order_lines.extend(
+                    extratora_vendas.extrair_pedidos(
+                        conteudo_arquivo=conteudo,
+                        nome_arquivo=nome_arquivo,
+                        canal_default=canal_arquivos_vendas.get(nome_arquivo),
+                    )
+                )
+
+            if order_lines:
+                resultado_vendas = calculate_sales_intelligence(
+                    order_lines,
+                    previous_month_product_ids=previous_month_product_ids,
+                    known_customer_ids=known_customer_ids,
+                )
+                sales_intel = resultado_vendas.sales_intelligence
+                product_breakdown = resultado_vendas.product_breakdown
+                # Quem chama processar_cliente() (api.py) persiste isto —
+                # é o known_customer_ids do MÊS SEGUINTE deste cliente.
+                clientes_ids_mes = sorted({
+                    linha.cliente_id for linha in order_lines if linha.cliente_id
+                })
+            else:
+                avisos.append(
+                    "conteudo_arquivos_vendas foi passado, mas nenhuma linha de pedido válida "
+                    "foi extraída (produto_id/cliente_id ausentes em todas) — sales_intelligence "
+                    "seguiu vazio, como no fluxo antigo."
+                )
+
         engine = MonthlyDiagnosticEngineMain(config)
         diagnostic = engine.run_monthly_diagnostic(
             reference_month=mes_enum,
             monthly_input=monthly_input,
-            sales_intel=SalesIntelligence(),
+            sales_intel=sales_intel,
             previous_month_metrics=previous_month_metrics,
+            recurring_pct_history=recurring_pct_history,
+            product_breakdown=product_breakdown,
         )
 
         if not diagnostic.is_valid:
@@ -547,7 +703,7 @@ class PipelineSAF:
         # dentro de run_monthly_diagnostic() (derive_business_category),
         # mas aqui já vem como string curta ("A".."E"), não enum.
         categoria = config.get("business_category", "")
-        return dados_motor, categoria
+        return dados_motor, categoria, clientes_ids_mes
 
     # ------------------------------------------------------------------
     # Gráficos reais (dp-03) — só pros blocos/dados que já temos de verdade
@@ -707,6 +863,20 @@ def _mes_para_enum(texto_mes: str) -> Month:
         if nome_mes in texto_norm:
             return m
     raise ValueError(f"Mês não reconhecido em periodo_analisado: {texto_mes!r}")
+
+
+def _ano_do_periodo(texto_mes: str) -> int:
+    """
+    NOVIDADE (auditoria 15/09/2026, handoff Pendência 3): extrai o ano de
+    um texto tipo 'Abril/2026' ou 'ABRIL 2026' (mesmo texto que
+    _mes_para_enum já recebe) — usado só pra preencher config['year'] do
+    Motor de Mensalidade antes de export_to_dict(), pra 'year' no export
+    não ficar sempre fixo em 2026 (ver comentário na chamada, em
+    _rodar_motor_mensalidade). Sem 4 dígitos reconhecíveis no texto, cai
+    no ano corrente — nunca inventa um ano que não veio do dado.
+    """
+    match = re.search(r"(19|20)\d{2}", texto_mes or "")
+    return int(match.group(0)) if match else datetime.now().year
 
 
 # ============================================================================
